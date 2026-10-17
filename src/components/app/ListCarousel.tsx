@@ -82,7 +82,7 @@ export function ListCarousel({ lists, tasks }: { lists: TaskList[]; tasks: Task[
         ref={scroller}
         role="region"
         aria-label="Task lists — swipe to switch"
-        className="flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain scroll-px-3 px-3 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex snap-x snap-mandatory items-start gap-3 overflow-x-auto overscroll-x-contain scroll-px-3 px-3 pb-3 [scrollbar-width:thin]"
         style={{ touchAction: "pan-x pan-y" }}
       >
         {lists.map((l) => (
