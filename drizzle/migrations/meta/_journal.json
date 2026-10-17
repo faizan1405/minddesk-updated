@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792087030183,
+      "tag": "0000_minddesk_tasks",
+      "breakpoints": true
+    }
+  ]
+}
