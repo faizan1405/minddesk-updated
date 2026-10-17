@@ -9,6 +9,7 @@ export const Route = createFileRoute("/api/auth/login")({
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
+          await api.bootstrapOwnerAccount();
           const { email, password } = Body.parse(await api.readJson(request));
           const user = await api.db().user.findUnique({ where: { email } });
           if (!user || !(await api.verifyPassword(password, user.passwordHash)))

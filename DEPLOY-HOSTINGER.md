@@ -6,7 +6,7 @@ One Node.js process serves both the React frontend and the API, so refreshing an
 ## API
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/auth/signup` | Create account (email + password ≥ 8 chars), starts session |
+| POST | `/api/auth/signup` | Disabled (returns 403 Forbidden) |
 | POST | `/api/auth/login` | Sign in, sets HTTP-only `md_session` cookie |
 | POST | `/api/auth/logout` | Ends session |
 | GET | `/api/auth/me` | Current user or `null` |
@@ -30,7 +30,10 @@ Create a database and user, note host, name, user and password.
 - Install: `npm install` (runs `prisma generate` automatically)
 - Build command: `npm run build:hostinger`
 - Start command: `npm start`  (runs `node .output/server/index.mjs`, listens on `PORT`)
-- Environment variables: `DATABASE_URL` (see `.env.example`), `NODE_ENV=production`
+- Environment variables:
+  - `DATABASE_URL` (see `.env.example`)
+  - `NODE_ENV=production`
+  - `ADMIN_EMAIL` and `ADMIN_PASSWORD` (one-time owner account bootstrap on empty database; `ADMIN_PASSWORD` can be removed after initial login)
 
 ## 3. Create the tables (once, and after future schema changes)
 Run `npm run db:migrate` (Prisma `migrate deploy`) from Hostinger's terminal/SSH,

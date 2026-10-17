@@ -72,7 +72,8 @@ export function previewRequest(method: string, rawPath: string, body: Record<str
 
   // ---- auth ----
   if (route === "GET /auth/me") return ok({ user: signedIn ? PREVIEW_USER : null });
-  if (route === "POST /auth/login" || route === "POST /auth/signup") {
+  if (route === "POST /auth/signup") return err(403, "Public signup is disabled.");
+  if (route === "POST /auth/login") {
     signedIn = true;
     return ok({ user: PREVIEW_USER });
   }

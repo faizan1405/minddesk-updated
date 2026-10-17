@@ -25,7 +25,6 @@ export const Route = createFileRoute("/auth")({
 function AuthPage() {
   const { user, signIn } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,7 +37,7 @@ function AuthPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await signIn(email, password, mode);
+      await signIn(email, password);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -51,9 +50,7 @@ function AuthPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center text-center">
           <Logo className="mb-4 h-10 w-10" />
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {mode === "signin" ? "Welcome back" : "Create your workspace"}
-          </h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-muted-foreground">Your tasks, all in one calm place.</p>
         </div>
 
@@ -61,30 +58,37 @@ function AuthPage() {
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" required autoComplete="email" value={email}
-                onChange={(e) => setEmail(e.target.value)} className="h-11 rounded-xl" />
+              <Input
+                id="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="h-11 rounded-xl"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" required minLength={mode === "signup" ? 8 : 1}
-                autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                value={password} onChange={(e) => setPassword(e.target.value)} className="h-11 rounded-xl" />
+              <Input
+                id="password"
+                type="password"
+                required
+                minLength={1}
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="h-11 rounded-xl"
+              />
             </div>
             <Button type="submit" disabled={busy} className="h-11 w-full rounded-xl">
               {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === "signin" ? "Sign in" : "Create account"}
+              Sign in
             </Button>
           </form>
         </div>
-
-        <p className="mt-6 text-center text-sm text-muted-foreground">
-          {mode === "signin" ? "New to MindDesk?" : "Already have an account?"}{" "}
-          <button className="font-medium text-primary hover:underline"
-            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}>
-            {mode === "signin" ? "Create an account" : "Sign in"}
-          </button>
-        </p>
       </div>
     </div>
   );
 }
+

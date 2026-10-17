@@ -58,6 +58,65 @@ export async function verifyPassword(pw: string, stored: string) {
   return expected.length === key.length && timingSafeEqual(expected, key);
 }
 
+// ---------- owner bootstrap ----------
+let bootstrapPromise: Promise<void> | null = null;
+let bootstrapCompleted = false;
+
+export function _resetBootstrapForTesting() {
+  bootstrapCompleted = false;
+  bootstrapPromise = null;
+}
+
+export async function bootstrapOwnerAccount(): Promise<void> {
+  if (bootstrapCompleted) return;
+  if (bootstrapPromise) return bootstrapPromise;
+
+  bootstrapPromise = (async () => {
+    try {
+      if (!process.env["DATABASE_URL"]) return;
+
+      const adminEmail = process.env["ADMIN_EMAIL"]?.trim().toLowerCase();
+      const adminPassword = process.env["ADMIN_PASSWORD"];
+
+      // If credentials are not provided (e.g. removed or not set), nothing to bootstrap
+      if (!adminEmail || !adminPassword) {
+        return;
+      }
+
+      // Check if users table is empty. Only bootstrap when users table is completely empty.
+      const userCount = await db().user.count();
+      if (userCount > 0) {
+        bootstrapCompleted = true;
+        return;
+      }
+
+      // Hash password using the existing scrypt mechanism and store account
+      const passwordHash = await hashPassword(adminPassword);
+      await db().user.create({
+        data: {
+          email: adminEmail,
+          passwordHash,
+        },
+      });
+
+      bootstrapCompleted = true;
+      console.log("[auth] Initial owner account created successfully.");
+    } catch (err: unknown) {
+      const code = err && typeof err === "object" && "code" in err ? (err as { code: string }).code : undefined;
+      if (code === "P2002") {
+        // Unique constraint violation (e.g. created concurrently by another worker)
+        bootstrapCompleted = true;
+        return;
+      }
+      console.error("[auth] Owner account bootstrap check failed:", err instanceof Error ? err.message : "Unknown error");
+      bootstrapPromise = null;
+    }
+  })();
+
+  return bootstrapPromise;
+}
+
+
 // ---------- sessions (HTTP-only cookie) ----------
 const COOKIE = "md_session";
 const SESSION_DAYS = 30;

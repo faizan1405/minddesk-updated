@@ -30,7 +30,7 @@ export function useAuth() {
   );
 
   const signIn = useCallback(
-    async (email: string, password: string, mode: "signin" | "signup") => {
+    async (email: string, password: string, mode: "signin" | "signup" = "signin") => {
       const { user } = await api<{ user: AuthUser }>(mode === "signin" ? "/api/auth/login" : "/api/auth/signup", {
         method: "POST",
         body: { email, password },
