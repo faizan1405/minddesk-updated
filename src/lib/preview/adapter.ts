@@ -74,6 +74,7 @@ function saveSessionDb() {
       pageContent: Array.from(db.pageContent.entries()),
       mapData: Array.from(db.mapData.entries()),
     };
+    window.sessionStorage.setItem("md_preview_db", JSON.stringify(serializable));
   } catch {
     // Ignore storage quota or disabled storage errors
   }
