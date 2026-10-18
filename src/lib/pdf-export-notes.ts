@@ -228,6 +228,92 @@ export function buildNotePdfDocDefinition(note: { title: string; blocks: Block[]
           margin: [0, 2, 0, 4],
         });
       }
+    } else if (block.type === "h1") {
+      content.push({
+        text: parseInlineFormatting(rawText.trim(), { defaultColor: "#0f172a" }),
+        fontSize: 18,
+        bold: true,
+        color: "#0f172a",
+        margin: [0, 14, 0, 4],
+        keepWithNext: true,
+      });
+    } else if (block.type === "h2") {
+      content.push({
+        text: parseInlineFormatting(rawText.trim(), { defaultColor: "#1e293b" }),
+        fontSize: 15,
+        bold: true,
+        color: "#1e293b",
+        margin: [0, 12, 0, 3],
+        keepWithNext: true,
+      });
+    } else if (block.type === "h3") {
+      content.push({
+        text: parseInlineFormatting(rawText.trim(), { defaultColor: "#334155" }),
+        fontSize: 13,
+        bold: true,
+        color: "#334155",
+        margin: [0, 10, 0, 2],
+        keepWithNext: true,
+      });
+    } else if (block.type === "callout") {
+      content.push({
+        table: {
+          widths: ["*"],
+          body: [
+            [
+              {
+                text: parseInlineFormatting(rawText, { defaultColor: "#1e293b" }),
+                fontSize: 10.5,
+                lineHeight: 1.4,
+                fillColor: "#f8fafc",
+                margin: [8, 8, 8, 8],
+              },
+            ],
+          ],
+        },
+        layout: {
+          hLineWidth: () => 1,
+          vLineWidth: (i: number) => (i === 0 ? 3 : 1),
+          hLineColor: () => "#e2e8f0",
+          vLineColor: (i: number) => (i === 0 ? "#3b82f6" : "#e2e8f0"),
+        },
+        margin: [0, 4, 0, 6],
+      });
+    } else if (block.type === "code") {
+      content.push({
+        table: {
+          widths: ["*"],
+          body: [
+            [
+              {
+                text: rawText,
+                fontSize: 9.5,
+                lineHeight: 1.35,
+                color: "#0f172a",
+                fillColor: "#f1f5f9",
+                margin: [10, 8, 10, 8],
+              },
+            ],
+          ],
+        },
+        layout: "noBorders",
+        margin: [0, 4, 0, 6],
+      });
+    } else if (block.type === "divider") {
+      content.push({
+        canvas: [
+          {
+            type: "line",
+            x1: 0,
+            y1: 0,
+            x2: 487,
+            y2: 0,
+            lineWidth: 0.75,
+            lineColor: "#cbd5e1",
+          },
+        ],
+        margin: [0, 8, 0, 10],
+      });
     } else if (block.type === "check") {
       const isChecked = Boolean(block.checked);
       content.push({
