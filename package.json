@@ -15,6 +15,7 @@
     "build:hostinger": "prisma generate && NITRO_PRESET=node-server vite build",
     "start": "node .output/server/index.mjs",
     "db:migrate": "prisma migrate deploy",
+    "trash:cleanup": "node scripts/cleanup-trash.mjs",
     "postinstall": "prisma generate"
   },
   "overrides": {

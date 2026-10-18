@@ -308,7 +308,7 @@ describe("Mind Map Lock / Unlock System", () => {
       const mockPrisma = {
         mindMap: {
           findFirst: vi.fn().mockResolvedValue(unlockedMap),
-          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         },
       };
       (globalThis as any).__prisma = mockPrisma;
@@ -321,8 +321,9 @@ describe("Mind Map Lock / Unlock System", () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.ok).toBe(true);
-      expect(mockPrisma.mindMap.deleteMany).toHaveBeenCalledWith({
+      expect(mockPrisma.mindMap.updateMany).toHaveBeenCalledWith({
         where: { id: "map_1", userId: mockUser.id },
+        data: { deletedAt: expect.any(Date) },
       });
     });
   });

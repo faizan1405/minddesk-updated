@@ -48,16 +48,18 @@ model Session {
 }
 
 model TaskList {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  title     String   @db.VarChar(200)
-  position  Float    @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  title     String    @db.VarChar(200)
+  position  Float     @default(0)
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks     Task[]
 
   @@index([userId, position])
+  @@index([userId, deletedAt])
   @@map("task_lists")
 }
 
@@ -74,6 +76,7 @@ model Task {
   dueDate        DateTime? @map("due_date") @db.Date
   recurrenceRule String?   @map("recurrence_rule") @db.VarChar(255)
   position       Float     @default(0)
+  deletedAt      DateTime? @map("deleted_at")
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -84,43 +87,48 @@ model Task {
   @@index([userId])
   @@index([listId])
   @@index([parentId])
+  @@index([userId, deletedAt])
   @@map("tasks")
 }
 
 model Project {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  title     String   @db.VarChar(200)
-  position  Float    @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  title     String    @db.VarChar(200)
+  position  Float     @default(0)
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   pages     Page[]
 
   @@index([userId, position])
+  @@index([userId, deletedAt])
   @@map("projects")
 }
 
 /// A page is a personal note (projectId = null) or a page inside a project.
 /// `content` is JSON text: { "blocks": [{ id, type: "p"|"check"|"number"|"bullet", text, checked? }] }
 model Page {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  projectId String?  @map("project_id") @db.Char(36)
-  parentId  String?  @map("parent_id") @db.Char(36)
-  title     String   @default("") @db.VarChar(300)
-  content   String   @db.LongText
-  version   Int      @default(1)
-  position  Float    @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  project   Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent    Page?    @relation("Subpages", fields: [parentId], references: [id], onDelete: Cascade)
-  children  Page[]   @relation("Subpages")
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  projectId String?   @map("project_id") @db.Char(36)
+  parentId  String?   @map("parent_id") @db.Char(36)
+  title     String    @default("") @db.VarChar(300)
+  content   String    @db.LongText
+  version   Int       @default(1)
+  position  Float     @default(0)
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent    Page?     @relation("Subpages", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Page[]    @relation("Subpages")
 
   @@index([userId, projectId])
   @@index([parentId])
+  @@index([userId, deletedAt])
   @@map("pages")
 }
 
@@ -128,22 +136,24 @@ model Page {
 /// All-day events: start_at/end_at hold the calendar dates at 00:00 UTC (end date inclusive) — no time-zone shift.
 /// recurrence_rule is a single RRULE such as "FREQ=WEEKLY"; occurrences are expanded at read time.
 model Event {
-  id             String   @id @default(uuid()) @db.Char(36)
-  userId         String   @map("user_id") @db.Char(36)
-  title          String   @db.VarChar(300)
-  description    String?  @db.Text
-  location       String?  @db.VarChar(300)
-  startAt        DateTime @map("start_at")
-  endAt          DateTime @map("end_at")
-  allDay         Boolean  @default(false) @map("all_day")
-  color          String   @default("blue") @db.VarChar(20)
-  recurrenceRule String?  @map("recurrence_rule") @db.VarChar(255)
-  timeZone       String   @default("Asia/Kolkata") @map("time_zone") @db.VarChar(64)
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String    @id @default(uuid()) @db.Char(36)
+  userId         String    @map("user_id") @db.Char(36)
+  title          String    @db.VarChar(300)
+  description    String?   @db.Text
+  location       String?   @db.VarChar(300)
+  startAt        DateTime  @map("start_at")
+  endAt          DateTime  @map("end_at")
+  allDay         Boolean   @default(false) @map("all_day")
+  color          String    @default("blue") @db.VarChar(20)
+  recurrenceRule String?   @map("recurrence_rule") @db.VarChar(255)
+  timeZone       String    @default("Asia/Kolkata") @map("time_zone") @db.VarChar(64)
+  deletedAt      DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, startAt])
+  @@index([userId, deletedAt])
   @@map("events")
 }
 
@@ -229,35 +239,39 @@ model FocusSession {
 /// holding topics, hierarchy, manual coordinates, styles and custom connections. Saved atomically with
 /// optimistic concurrency on `version`.
 model MindMap {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  title     String   @db.VarChar(200)
-  data      String   @db.LongText
-  isLocked  Boolean  @default(false) @map("is_locked")
-  nodeCount Int      @default(1) @map("node_count")
-  version   Int      @default(1)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  title     String    @db.VarChar(200)
+  data      String    @db.LongText
+  isLocked  Boolean   @default(false) @map("is_locked")
+  nodeCount Int       @default(1) @map("node_count")
+  version   Int       @default(1)
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt])
+  @@index([userId, deletedAt])
   @@map("mind_maps")
 }
 
 /// Habits & Routines. A routine groups habits (a habit belongs to at most one routine).
-/// Deleting a routine keeps its habits (routine_id → NULL) and their history.
+/// Deleting a routine moves it to recycle bin and keeps its habits recoverable.
 model Routine {
-  id        String   @id @default(uuid()) @db.Char(36)
-  userId    String   @map("user_id") @db.Char(36)
-  title     String   @db.VarChar(200)
-  position  Float    @default(0)
-  collapsed Boolean  @default(false)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid()) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  title     String    @db.VarChar(200)
+  position  Float     @default(0)
+  collapsed Boolean   @default(false)
+  deletedAt DateTime? @map("deleted_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   habits    Habit[]
 
   @@index([userId, position])
+  @@index([userId, deletedAt])
   @@map("routines")
 }
 
@@ -272,6 +286,7 @@ model Habit {
   repeatDays  Int               @default(127) @map("repeat_days") @db.TinyInt
   position    Float             @default(0)
   startDate   String            @map("start_date") @db.Char(10)
+  deletedAt   DateTime?         @map("deleted_at")
   createdAt   DateTime          @default(now()) @map("created_at")
   updatedAt   DateTime          @updatedAt @map("updated_at")
   user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -280,6 +295,7 @@ model Habit {
 
   @@index([userId, position])
   @@index([routineId])
+  @@index([userId, deletedAt])
   @@map("habits")
 }
 

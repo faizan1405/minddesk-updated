@@ -19,7 +19,7 @@ export const Route = createFileRoute("/api/tasks")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const tasks = await api.db().task.findMany({
-            where: { userId: user.id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+            where: { userId: user.id, deletedAt: null }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
           });
           return api.json(tasks.map(api.taskDto));
         });
@@ -29,10 +29,10 @@ export const Route = createFileRoute("/api/tasks")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const b = Create.parse(await api.readJson(request));
-          const list = await api.db().taskList.findFirst({ where: { id: b.list_id, userId: user.id } });
+          const list = await api.db().taskList.findFirst({ where: { id: b.list_id, userId: user.id, deletedAt: null } });
           if (!list) throw new api.ApiError(404, "List not found");
           if (b.parent_id) {
-            const parent = await api.db().task.findFirst({ where: { id: b.parent_id, userId: user.id, listId: list.id } });
+            const parent = await api.db().task.findFirst({ where: { id: b.parent_id, userId: user.id, listId: list.id, deletedAt: null } });
             if (!parent || parent.parentId) throw new api.ApiError(400, "Invalid parent task");
           }
           const task = await api.db().task.create({

@@ -24,6 +24,7 @@ import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedStarredRouteImport } from './routes/_authenticated.starred'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated.tasks'
 import { Route as AuthenticatedTemplatesRouteImport } from './routes/_authenticated.templates'
+import { Route as AuthenticatedTrashRouteImport } from './routes/_authenticated.trash'
 import { Route as ApiAnalyticsRouteImport } from './routes/api.analytics'
 import { Route as ApiEventsRouteImport } from './routes/api.events'
 import { Route as ApiHabitsRouteImport } from './routes/api.habits'
@@ -35,6 +36,7 @@ import { Route as ApiRoutinesRouteImport } from './routes/api.routines'
 import { Route as ApiSettingsRouteImport } from './routes/api.settings'
 import { Route as ApiTaskListsRouteImport } from './routes/api.task-lists'
 import { Route as ApiTasksRouteImport } from './routes/api.tasks'
+import { Route as ApiTrashRouteImport } from './routes/api.trash'
 import { Route as AuthenticatedListsListIdRouteImport } from './routes/_authenticated.lists.$listId'
 import { Route as AuthenticatedMindMapsIndexRouteImport } from './routes/_authenticated.mind-maps.index'
 import { Route as AuthenticatedMindMapsMapIdRouteImport } from './routes/_authenticated.mind-maps.$mapId'
@@ -63,6 +65,11 @@ import { Route as ApiProjectsIdRouteImport } from './routes/api.projects.$id'
 import { Route as ApiRoutinesIdRouteImport } from './routes/api.routines.$id'
 import { Route as ApiTaskListsIdRouteImport } from './routes/api.task-lists.$id'
 import { Route as ApiTasksIdRouteImport } from './routes/api.tasks.$id'
+import { Route as ApiTrashCleanupRouteImport } from './routes/api.trash.cleanup'
+import { Route as ApiTrashEmptyRouteImport } from './routes/api.trash.empty'
+import { Route as ApiTrashPermanentRouteImport } from './routes/api.trash.permanent'
+import { Route as ApiTrashRestoreRouteImport } from './routes/api.trash.restore'
+import { Route as ApiTrashRestoreAllRouteImport } from './routes/api.trash.restore-all'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
 import { Route as AuthenticatedProjectsProjectIdPageIdRouteImport } from './routes/_authenticated.projects.$projectId.$pageId'
 import { Route as ApiPlanActivitiesIdRouteImport } from './routes/api.plan.activities.$id'
@@ -144,6 +151,11 @@ const AuthenticatedTemplatesRoute = AuthenticatedTemplatesRouteImport.update({
   path: '/templates',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedTrashRoute = AuthenticatedTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const ApiAnalyticsRoute = ApiAnalyticsRouteImport.update({
   id: '/api/analytics',
   path: '/api/analytics',
@@ -197,6 +209,11 @@ const ApiTaskListsRoute = ApiTaskListsRouteImport.update({
 const ApiTasksRoute = ApiTasksRouteImport.update({
   id: '/api/tasks',
   path: '/api/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiTrashRoute = ApiTrashRouteImport.update({
+  id: '/api/trash',
+  path: '/api/trash',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedListsListIdRoute =
@@ -345,6 +362,31 @@ const ApiTasksIdRoute = ApiTasksIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ApiTasksRoute,
 } as any)
+const ApiTrashCleanupRoute = ApiTrashCleanupRouteImport.update({
+  id: '/cleanup',
+  path: '/cleanup',
+  getParentRoute: () => ApiTrashRoute,
+} as any)
+const ApiTrashEmptyRoute = ApiTrashEmptyRouteImport.update({
+  id: '/empty',
+  path: '/empty',
+  getParentRoute: () => ApiTrashRoute,
+} as any)
+const ApiTrashPermanentRoute = ApiTrashPermanentRouteImport.update({
+  id: '/permanent',
+  path: '/permanent',
+  getParentRoute: () => ApiTrashRoute,
+} as any)
+const ApiTrashRestoreRoute = ApiTrashRestoreRouteImport.update({
+  id: '/restore',
+  path: '/restore',
+  getParentRoute: () => ApiTrashRoute,
+} as any)
+const ApiTrashRestoreAllRoute = ApiTrashRestoreAllRouteImport.update({
+  id: '/restore-all',
+  path: '/restore-all',
+  getParentRoute: () => ApiTrashRoute,
+} as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
     id: '/',
@@ -395,6 +437,7 @@ export interface FileRoutesByFullPath {
   '/starred': typeof AuthenticatedStarredRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/templates': typeof AuthenticatedTemplatesRoute
+  '/trash': typeof AuthenticatedTrashRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -406,6 +449,7 @@ export interface FileRoutesByFullPath {
   '/api/settings': typeof ApiSettingsRoute
   '/api/task-lists': typeof ApiTaskListsRouteWithChildren
   '/api/tasks': typeof ApiTasksRouteWithChildren
+  '/api/trash': typeof ApiTrashRouteWithChildren
   '/lists/$listId': typeof AuthenticatedListsListIdRoute
   '/mind-maps/$mapId': typeof AuthenticatedMindMapsMapIdRoute
   '/notes/$pageId': typeof AuthenticatedNotesPageIdRoute
@@ -431,6 +475,11 @@ export interface FileRoutesByFullPath {
   '/api/routines/$id': typeof ApiRoutinesIdRoute
   '/api/task-lists/$id': typeof ApiTaskListsIdRoute
   '/api/tasks/$id': typeof ApiTasksIdRoute
+  '/api/trash/cleanup': typeof ApiTrashCleanupRoute
+  '/api/trash/empty': typeof ApiTrashEmptyRoute
+  '/api/trash/permanent': typeof ApiTrashPermanentRoute
+  '/api/trash/restore': typeof ApiTrashRestoreRoute
+  '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
   '/mind-maps/': typeof AuthenticatedMindMapsIndexRoute
   '/notes/': typeof AuthenticatedNotesIndexRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -453,6 +502,7 @@ export interface FileRoutesByTo {
   '/starred': typeof AuthenticatedStarredRoute
   '/tasks': typeof AuthenticatedTasksRoute
   '/templates': typeof AuthenticatedTemplatesRoute
+  '/trash': typeof AuthenticatedTrashRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -464,6 +514,7 @@ export interface FileRoutesByTo {
   '/api/settings': typeof ApiSettingsRoute
   '/api/task-lists': typeof ApiTaskListsRouteWithChildren
   '/api/tasks': typeof ApiTasksRouteWithChildren
+  '/api/trash': typeof ApiTrashRouteWithChildren
   '/lists/$listId': typeof AuthenticatedListsListIdRoute
   '/mind-maps/$mapId': typeof AuthenticatedMindMapsMapIdRoute
   '/notes/$pageId': typeof AuthenticatedNotesPageIdRoute
@@ -488,6 +539,11 @@ export interface FileRoutesByTo {
   '/api/routines/$id': typeof ApiRoutinesIdRoute
   '/api/task-lists/$id': typeof ApiTaskListsIdRoute
   '/api/tasks/$id': typeof ApiTasksIdRoute
+  '/api/trash/cleanup': typeof ApiTrashCleanupRoute
+  '/api/trash/empty': typeof ApiTrashEmptyRoute
+  '/api/trash/permanent': typeof ApiTrashPermanentRoute
+  '/api/trash/restore': typeof ApiTrashRestoreRoute
+  '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
   '/mind-maps': typeof AuthenticatedMindMapsIndexRoute
   '/notes': typeof AuthenticatedNotesIndexRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
@@ -515,6 +571,7 @@ export interface FileRoutesById {
   '/_authenticated/starred': typeof AuthenticatedStarredRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/templates': typeof AuthenticatedTemplatesRoute
+  '/_authenticated/trash': typeof AuthenticatedTrashRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -526,6 +583,7 @@ export interface FileRoutesById {
   '/api/settings': typeof ApiSettingsRoute
   '/api/task-lists': typeof ApiTaskListsRouteWithChildren
   '/api/tasks': typeof ApiTasksRouteWithChildren
+  '/api/trash': typeof ApiTrashRouteWithChildren
   '/_authenticated/lists/$listId': typeof AuthenticatedListsListIdRoute
   '/_authenticated/mind-maps/$mapId': typeof AuthenticatedMindMapsMapIdRoute
   '/_authenticated/notes/$pageId': typeof AuthenticatedNotesPageIdRoute
@@ -551,6 +609,11 @@ export interface FileRoutesById {
   '/api/routines/$id': typeof ApiRoutinesIdRoute
   '/api/task-lists/$id': typeof ApiTaskListsIdRoute
   '/api/tasks/$id': typeof ApiTasksIdRoute
+  '/api/trash/cleanup': typeof ApiTrashCleanupRoute
+  '/api/trash/empty': typeof ApiTrashEmptyRoute
+  '/api/trash/permanent': typeof ApiTrashPermanentRoute
+  '/api/trash/restore': typeof ApiTrashRestoreRoute
+  '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
   '/_authenticated/mind-maps/': typeof AuthenticatedMindMapsIndexRoute
   '/_authenticated/notes/': typeof AuthenticatedNotesIndexRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
@@ -578,6 +641,7 @@ export interface FileRouteTypes {
     | '/starred'
     | '/tasks'
     | '/templates'
+    | '/trash'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -589,6 +653,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/task-lists'
     | '/api/tasks'
+    | '/api/trash'
     | '/lists/$listId'
     | '/mind-maps/$mapId'
     | '/notes/$pageId'
@@ -614,6 +679,11 @@ export interface FileRouteTypes {
     | '/api/routines/$id'
     | '/api/task-lists/$id'
     | '/api/tasks/$id'
+    | '/api/trash/cleanup'
+    | '/api/trash/empty'
+    | '/api/trash/permanent'
+    | '/api/trash/restore'
+    | '/api/trash/restore-all'
     | '/mind-maps/'
     | '/notes/'
     | '/projects/'
@@ -636,6 +706,7 @@ export interface FileRouteTypes {
     | '/starred'
     | '/tasks'
     | '/templates'
+    | '/trash'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -647,6 +718,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/task-lists'
     | '/api/tasks'
+    | '/api/trash'
     | '/lists/$listId'
     | '/mind-maps/$mapId'
     | '/notes/$pageId'
@@ -671,6 +743,11 @@ export interface FileRouteTypes {
     | '/api/routines/$id'
     | '/api/task-lists/$id'
     | '/api/tasks/$id'
+    | '/api/trash/cleanup'
+    | '/api/trash/empty'
+    | '/api/trash/permanent'
+    | '/api/trash/restore'
+    | '/api/trash/restore-all'
     | '/mind-maps'
     | '/notes'
     | '/projects'
@@ -697,6 +774,7 @@ export interface FileRouteTypes {
     | '/_authenticated/starred'
     | '/_authenticated/tasks'
     | '/_authenticated/templates'
+    | '/_authenticated/trash'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -708,6 +786,7 @@ export interface FileRouteTypes {
     | '/api/settings'
     | '/api/task-lists'
     | '/api/tasks'
+    | '/api/trash'
     | '/_authenticated/lists/$listId'
     | '/_authenticated/mind-maps/$mapId'
     | '/_authenticated/notes/$pageId'
@@ -733,6 +812,11 @@ export interface FileRouteTypes {
     | '/api/routines/$id'
     | '/api/task-lists/$id'
     | '/api/tasks/$id'
+    | '/api/trash/cleanup'
+    | '/api/trash/empty'
+    | '/api/trash/permanent'
+    | '/api/trash/restore'
+    | '/api/trash/restore-all'
     | '/_authenticated/mind-maps/'
     | '/_authenticated/notes/'
     | '/_authenticated/projects/'
@@ -759,6 +843,7 @@ export interface RootRouteChildren {
   ApiSettingsRoute: typeof ApiSettingsRoute
   ApiTaskListsRoute: typeof ApiTaskListsRouteWithChildren
   ApiTasksRoute: typeof ApiTasksRouteWithChildren
+  ApiTrashRoute: typeof ApiTrashRouteWithChildren
   ApiAuthLoginRoute: typeof ApiAuthLoginRoute
   ApiAuthLogoutRoute: typeof ApiAuthLogoutRoute
   ApiAuthMeRoute: typeof ApiAuthMeRoute
@@ -880,6 +965,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedTemplatesRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/trash': {
+      id: '/_authenticated/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof AuthenticatedTrashRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/api/analytics': {
       id: '/api/analytics'
       path: '/api/analytics'
@@ -955,6 +1047,13 @@ declare module '@tanstack/react-router' {
       path: '/api/tasks'
       fullPath: '/api/tasks'
       preLoaderRoute: typeof ApiTasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/trash': {
+      id: '/api/trash'
+      path: '/api/trash'
+      fullPath: '/api/trash'
+      preLoaderRoute: typeof ApiTrashRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/lists/$listId': {
@@ -1153,6 +1252,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTasksIdRouteImport
       parentRoute: typeof ApiTasksRoute
     }
+    '/api/trash/cleanup': {
+      id: '/api/trash/cleanup'
+      path: '/cleanup'
+      fullPath: '/api/trash/cleanup'
+      preLoaderRoute: typeof ApiTrashCleanupRouteImport
+      parentRoute: typeof ApiTrashRoute
+    }
+    '/api/trash/empty': {
+      id: '/api/trash/empty'
+      path: '/empty'
+      fullPath: '/api/trash/empty'
+      preLoaderRoute: typeof ApiTrashEmptyRouteImport
+      parentRoute: typeof ApiTrashRoute
+    }
+    '/api/trash/permanent': {
+      id: '/api/trash/permanent'
+      path: '/permanent'
+      fullPath: '/api/trash/permanent'
+      preLoaderRoute: typeof ApiTrashPermanentRouteImport
+      parentRoute: typeof ApiTrashRoute
+    }
+    '/api/trash/restore': {
+      id: '/api/trash/restore'
+      path: '/restore'
+      fullPath: '/api/trash/restore'
+      preLoaderRoute: typeof ApiTrashRestoreRouteImport
+      parentRoute: typeof ApiTrashRoute
+    }
+    '/api/trash/restore-all': {
+      id: '/api/trash/restore-all'
+      path: '/restore-all'
+      fullPath: '/api/trash/restore-all'
+      preLoaderRoute: typeof ApiTrashRestoreAllRouteImport
+      parentRoute: typeof ApiTrashRoute
+    }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
       path: '/'
@@ -1273,6 +1407,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedStarredRoute: typeof AuthenticatedStarredRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
   AuthenticatedTemplatesRoute: typeof AuthenticatedTemplatesRoute
+  AuthenticatedTrashRoute: typeof AuthenticatedTrashRoute
   AuthenticatedListsListIdRoute: typeof AuthenticatedListsListIdRoute
 }
 
@@ -1289,6 +1424,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedStarredRoute: AuthenticatedStarredRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
   AuthenticatedTemplatesRoute: AuthenticatedTemplatesRoute,
+  AuthenticatedTrashRoute: AuthenticatedTrashRoute,
   AuthenticatedListsListIdRoute: AuthenticatedListsListIdRoute,
 }
 
@@ -1406,6 +1542,26 @@ const ApiTasksRouteWithChildren = ApiTasksRoute._addFileChildren(
   ApiTasksRouteChildren,
 )
 
+interface ApiTrashRouteChildren {
+  ApiTrashCleanupRoute: typeof ApiTrashCleanupRoute
+  ApiTrashEmptyRoute: typeof ApiTrashEmptyRoute
+  ApiTrashPermanentRoute: typeof ApiTrashPermanentRoute
+  ApiTrashRestoreRoute: typeof ApiTrashRestoreRoute
+  ApiTrashRestoreAllRoute: typeof ApiTrashRestoreAllRoute
+}
+
+const ApiTrashRouteChildren: ApiTrashRouteChildren = {
+  ApiTrashCleanupRoute: ApiTrashCleanupRoute,
+  ApiTrashEmptyRoute: ApiTrashEmptyRoute,
+  ApiTrashPermanentRoute: ApiTrashPermanentRoute,
+  ApiTrashRestoreRoute: ApiTrashRestoreRoute,
+  ApiTrashRestoreAllRoute: ApiTrashRestoreAllRoute,
+}
+
+const ApiTrashRouteWithChildren = ApiTrashRoute._addFileChildren(
+  ApiTrashRouteChildren,
+)
+
 interface ApiPlanActivitiesIdRouteChildren {
   ApiPlanActivitiesIdExceptionsDateRoute: typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
@@ -1455,6 +1611,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSettingsRoute: ApiSettingsRoute,
   ApiTaskListsRoute: ApiTaskListsRouteWithChildren,
   ApiTasksRoute: ApiTasksRouteWithChildren,
+  ApiTrashRoute: ApiTrashRouteWithChildren,
   ApiAuthLoginRoute: ApiAuthLoginRoute,
   ApiAuthLogoutRoute: ApiAuthLogoutRoute,
   ApiAuthMeRoute: ApiAuthMeRoute,

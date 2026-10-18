@@ -7,7 +7,7 @@ export const Route = createFileRoute("/api/events/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const e = await api.db().event.findFirst({ where: { id: params.id, userId: user.id } });
+          const e = await api.db().event.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!e) throw new api.ApiError(404, "Event not found");
           return api.json(api.eventDto(e));
         });
@@ -18,7 +18,7 @@ export const Route = createFileRoute("/api/events/$id")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const data = api.eventData(await api.readJson(request));
-          const owned = await api.db().event.findFirst({ where: { id: params.id, userId: user.id } });
+          const owned = await api.db().event.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!owned) throw new api.ApiError(404, "Event not found");
           const e = await api.db().event.update({ where: { id: owned.id }, data });
           return api.json(api.eventDto(e));
@@ -28,8 +28,9 @@ export const Route = createFileRoute("/api/events/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const res = await api.db().event.deleteMany({ where: { id: params.id, userId: user.id } });
-          if (res.count === 0) throw new api.ApiError(404, "Event not found");
+          const owned = await api.db().event.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
+          if (!owned) throw new api.ApiError(404, "Event not found");
+          await api.db().event.update({ where: { id: owned.id }, data: { deletedAt: new Date() } });
           return api.json({ ok: true });
         });
       },

@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/projects")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const rows = await api.db().project.findMany({
-            where: { userId: user.id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+            where: { userId: user.id, deletedAt: null }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
           });
           return api.json(rows.map(api.projectDto));
         });

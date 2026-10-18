@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/pages")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const rows = await api.db().page.findMany({
-            where: { userId: user.id }, select: api.pageMetaSelect,
+            where: { userId: user.id, deletedAt: null }, select: api.pageMetaSelect,
             orderBy: [{ position: "asc" }, { createdAt: "asc" }],
           });
           return api.json(rows.map(api.pageMetaDto));
@@ -34,14 +34,14 @@ export const Route = createFileRoute("/api/pages")({
           const prisma = api.db();
           let projectId = b.project_id ?? null;
           if (b.parent_id) {
-            const parent = await prisma.page.findFirst({ where: { id: b.parent_id, userId: user.id }, select: { projectId: true } });
+            const parent = await prisma.page.findFirst({ where: { id: b.parent_id, userId: user.id, deletedAt: null }, select: { projectId: true } });
             if (!parent) throw new api.ApiError(404, "Parent page not found");
             if (b.project_id !== undefined && parent.projectId !== projectId)
               throw new api.ApiError(400, "Parent page belongs to a different project");
             projectId = parent.projectId;
           }
           if (projectId) {
-            const proj = await prisma.project.findFirst({ where: { id: projectId, userId: user.id } });
+            const proj = await prisma.project.findFirst({ where: { id: projectId, userId: user.id, deletedAt: null } });
             if (!proj) throw new api.ApiError(404, "Project not found");
           }
           const page = await prisma.page.create({

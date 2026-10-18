@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
         const { parseDoc } = await import("@/lib/mindmap-doc");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const m = await api.db().mindMap.findFirst({ where: { id: params.id, userId: user.id } });
+          const m = await api.db().mindMap.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!m) throw new api.ApiError(404, "Mind map not found");
           return api.json({ ...api.mindMapMetaDto(m), data: parseDoc(JSON.parse(m.data)) });
         });
@@ -32,7 +32,7 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
           const where = { id: params.id, userId: user.id };
 
           const current = await prisma.mindMap.findFirst({ where });
-          if (!current) throw new api.ApiError(404, "Mind map not found");
+          if (!current || current.deletedAt) throw new api.ApiError(404, "Mind map not found");
 
           const isModifyingContent = b.data !== undefined || b.title !== undefined;
           if (current.isLocked && isModifyingContent) {
@@ -76,12 +76,11 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
           const prisma = api.db();
           const where = { id: params.id, userId: user.id };
           const current = await prisma.mindMap.findFirst({ where });
-          if (!current) throw new api.ApiError(404, "Mind map not found");
+          if (!current || current.deletedAt) throw new api.ApiError(404, "Mind map not found");
           if (current.isLocked) {
             throw new api.ApiError(423, "423 Locked — Unlock this mind map before deleting.");
           }
-          const res = await prisma.mindMap.deleteMany({ where });
-          if (res.count === 0) throw new api.ApiError(404, "Mind map not found");
+          await prisma.mindMap.updateMany({ where, data: { deletedAt: new Date() } });
           return api.json({ ok: true });
         });
       },

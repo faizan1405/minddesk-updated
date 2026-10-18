@@ -27,7 +27,7 @@ export const Route = createFileRoute("/api/analytics")({
           // Query real MySQL data belonging strictly to the authenticated user
           const [tasks, focusSessions, habits, settingsRow] = await Promise.all([
             prisma.task.findMany({
-              where: { userId: user.id },
+              where: { userId: user.id, deletedAt: null },
               select: {
                 id: true,
                 completed: true,
@@ -50,7 +50,7 @@ export const Route = createFileRoute("/api/analytics")({
               },
             }),
             prisma.habit.findMany({
-              where: { userId: user.id },
+              where: { userId: user.id, deletedAt: null },
               include: {
                 completions: {
                   select: { date: true },

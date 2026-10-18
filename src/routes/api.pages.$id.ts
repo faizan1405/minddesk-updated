@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/pages/$id")({
         const { parseContent } = await import("@/lib/page-content");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const page = await api.db().page.findFirst({ where: { id: params.id, userId: user.id } });
+          const page = await api.db().page.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!page) throw new api.ApiError(404, "Page not found");
           return api.json({ ...api.pageMetaDto(page), content: parseContent(page.content) });
         });
@@ -28,7 +28,7 @@ export const Route = createFileRoute("/api/pages/$id")({
           const user = await api.requireUser(request);
           const b = Patch.parse(await api.readJson(request));
           const prisma = api.db();
-          const where = { id: params.id, userId: user.id };
+          const where = { id: params.id, userId: user.id, deletedAt: null };
           if (b.content) {
             if (b.base_version === undefined) throw new api.ApiError(400, "base_version is required with content");
             const res = await prisma.page.updateMany({
@@ -55,8 +55,25 @@ export const Route = createFileRoute("/api/pages/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const res = await api.db().page.deleteMany({ where: { id: params.id, userId: user.id } });
-          if (res.count === 0) throw new api.ApiError(404, "Page not found");
+          const prisma = api.db();
+          const page = await prisma.page.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
+          if (!page) throw new api.ApiError(404, "Page not found");
+          const now = new Date();
+          const toDelete = [page.id];
+          let queue = [page.id];
+          while (queue.length > 0) {
+            const children = await prisma.page.findMany({
+              where: { parentId: { in: queue }, userId: user.id, deletedAt: null },
+              select: { id: true },
+            });
+            const nextIds = children.map((c) => c.id);
+            toDelete.push(...nextIds);
+            queue = nextIds;
+          }
+          await prisma.page.updateMany({
+            where: { id: { in: toDelete }, userId: user.id },
+            data: { deletedAt: now },
+          });
           return api.json({ ok: true });
         });
       },

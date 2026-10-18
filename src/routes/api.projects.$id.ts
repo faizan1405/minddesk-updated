@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/projects/$id")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const { title } = Patch.parse(await api.readJson(request));
-          const owned = await api.db().project.findFirst({ where: { id: params.id, userId: user.id } });
+          const owned = await api.db().project.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!owned) throw new api.ApiError(404, "Project not found");
           const p = await api.db().project.update({ where: { id: owned.id }, data: { title } });
           return api.json(api.projectDto(p));
@@ -21,8 +21,14 @@ export const Route = createFileRoute("/api/projects/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const res = await api.db().project.deleteMany({ where: { id: params.id, userId: user.id } });
-          if (res.count === 0) throw new api.ApiError(404, "Project not found");
+          const prisma = api.db();
+          const owned = await prisma.project.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
+          if (!owned) throw new api.ApiError(404, "Project not found");
+          const now = new Date();
+          await prisma.$transaction([
+            prisma.project.update({ where: { id: owned.id }, data: { deletedAt: now } }),
+            prisma.page.updateMany({ where: { projectId: owned.id, userId: user.id, deletedAt: null }, data: { deletedAt: now } }),
+          ]);
           return api.json({ ok: true });
         });
       },

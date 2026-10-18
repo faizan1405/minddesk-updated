@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/habits/$id")({
           const user = await api.requireUser(request);
           const b = HabitPatch.parse(await api.readJson(request));
           const prisma = api.db();
-          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id } });
+          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!h) throw new api.ApiError(404, "Habit not found");
           if (b.routine_id !== undefined) await api.ownRoutine(b.routine_id, user.id);
           const moving = b.routine_id !== undefined && b.routine_id !== h.routineId;
@@ -31,8 +31,9 @@ export const Route = createFileRoute("/api/habits/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const res = await api.db().habit.deleteMany({ where: { id: params.id, userId: user.id } });
-          if (res.count === 0) throw new api.ApiError(404, "Habit not found");
+          const h = await api.db().habit.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
+          if (!h) throw new api.ApiError(404, "Habit not found");
+          await api.db().habit.update({ where: { id: h.id }, data: { deletedAt: new Date() } });
           return api.json({ ok: true });
         });
       },

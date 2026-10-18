@@ -10,7 +10,7 @@ export const Route = createFileRoute("/api/habits/$id/completions/$date")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const prisma = api.db();
-          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id } });
+          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!h) throw new api.ApiError(404, "Habit not found");
           const msg = completionError({ repeat_days: h.repeatDays, start_date: h.startDate }, params.date, todayIn("Pacific/Kiritimati"));
           if (msg) throw new api.ApiError(400, msg);
@@ -26,7 +26,7 @@ export const Route = createFileRoute("/api/habits/$id/completions/$date")({
           const user = await api.requireUser(request);
           if (!isDateKey(params.date)) throw new api.ApiError(400, "Invalid date");
           const prisma = api.db();
-          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id }, select: { id: true } });
+          const h = await prisma.habit.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null }, select: { id: true } });
           if (!h) throw new api.ApiError(404, "Habit not found");
           await prisma.habitCompletion.deleteMany({ where: { userId: user.id, habitId: h.id, date: params.date } });
           return api.json({ habit_id: h.id, date: params.date, completed: false });

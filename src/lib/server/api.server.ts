@@ -204,7 +204,7 @@ export const pageMetaDto = (p: Omit<DbPage, "content">) => ({
 });
 export const pageMetaSelect = {
   id: true, userId: true, projectId: true, parentId: true, title: true, position: true, version: true,
-  createdAt: true, updatedAt: true,
+  createdAt: true, updatedAt: true, deletedAt: true,
 } as const;
 
 // ---------- calendar ----------
@@ -310,7 +310,7 @@ export const mindMapMetaDto = (m: Omit<DbMap, "data">) => ({
   id: m.id, title: m.title, is_locked: Boolean(m.isLocked), node_count: m.nodeCount, version: m.version,
   created_at: m.createdAt.toISOString(), updated_at: m.updatedAt.toISOString(),
 });
-export const mindMapMetaSelect = { id: true, userId: true, title: true, isLocked: true, nodeCount: true, version: true, createdAt: true, updatedAt: true } as const;
+export const mindMapMetaSelect = { id: true, userId: true, title: true, isLocked: true, nodeCount: true, version: true, createdAt: true, updatedAt: true, deletedAt: true } as const;
 
 // ---------- habits & routines ----------
 import type { Habit as DbHabit, Routine as DbRoutine } from "@prisma/client";
@@ -328,7 +328,7 @@ export const habitInclude = { completions: { select: { date: true } } } as const
 /** Throws 404 unless the routine belongs to the user. */
 export async function ownRoutine(id: string | null | undefined, userId: string) {
   if (!id) return;
-  const r = await db().routine.findFirst({ where: { id, userId }, select: { id: true } });
+  const r = await db().routine.findFirst({ where: { id, userId, deletedAt: null }, select: { id: true } });
   if (!r) throw new ApiError(404, "Routine not found");
 }
 
@@ -342,11 +342,11 @@ export async function currentSessionId(request: Request) {
 
 export async function dataCounts(userId: string) {
   const p = db();
-  const where = { userId };
+  const where = { userId, deletedAt: null };
   const [task_lists, tasks, notes, project_pages, projects, events, plan_activities, mind_maps, habits, routines] = await Promise.all([
     p.taskList.count({ where }), p.task.count({ where }),
-    p.page.count({ where: { userId, projectId: null } }), p.page.count({ where: { userId, NOT: { projectId: null } } }),
-    p.project.count({ where }), p.event.count({ where }), p.planActivity.count({ where }),
+    p.page.count({ where: { userId, projectId: null, deletedAt: null } }), p.page.count({ where: { userId, NOT: { projectId: null }, deletedAt: null } }),
+    p.project.count({ where }), p.event.count({ where }), p.planActivity.count({ where: { userId } }),
     p.mindMap.count({ where }), p.habit.count({ where }), p.routine.count({ where }),
   ]);
   return { task_lists, tasks, notes, project_pages, projects, events, plan_activities, mind_maps, habits, routines };
@@ -358,12 +358,13 @@ const omitUser = <T extends { userId?: unknown }>(rows: T[]) => rows.map(({ user
 export async function exportUserData(user: { id: string; email: string; displayName?: string | null; createdAt: Date }) {
   const p = db();
   const where = { userId: user.id };
+  const whereActive = { userId: user.id, deletedAt: null };
   const [settings, lists, tasks, projects, pages, events, cats, acts, focus, maps, routines, habits, completions] = await Promise.all([
-    p.userSettings.findUnique({ where }), p.taskList.findMany({ where }), p.task.findMany({ where }),
-    p.project.findMany({ where }), p.page.findMany({ where }), p.event.findMany({ where }),
+    p.userSettings.findUnique({ where }), p.taskList.findMany({ where: whereActive }), p.task.findMany({ where: whereActive }),
+    p.project.findMany({ where: whereActive }), p.page.findMany({ where: whereActive }), p.event.findMany({ where: whereActive }),
     p.planCategory.findMany({ where }), p.planActivity.findMany({ where, include: { exceptions: true } }),
-    p.focusSession.findMany({ where }), p.mindMap.findMany({ where }), p.routine.findMany({ where }),
-    p.habit.findMany({ where }), p.habitCompletion.findMany({ where }),
+    p.focusSession.findMany({ where }), p.mindMap.findMany({ where: whereActive }), p.routine.findMany({ where: whereActive }),
+    p.habit.findMany({ where: whereActive }), p.habitCompletion.findMany({ where: { userId: user.id, habit: { deletedAt: null } } }),
   ]);
   const parse = (s: string) => { try { return JSON.parse(s); } catch { return s; } };
   return {

@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/task-lists")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const lists = await api.db().taskList.findMany({
-            where: { userId: user.id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+            where: { userId: user.id, deletedAt: null }, orderBy: [{ position: "asc" }, { createdAt: "asc" }],
           });
           return api.json(lists.map(api.listDto));
         });

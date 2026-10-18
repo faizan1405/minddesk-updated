@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/habits/order")({
           const b = OrderInput.parse(await api.readJson(request));
           await api.ownRoutine(b.routine_id, user.id);
           const prisma = api.db();
-          const owned = await prisma.habit.count({ where: { id: { in: b.habit_ids }, userId: user.id } });
+          const owned = await prisma.habit.count({ where: { id: { in: b.habit_ids }, userId: user.id, deletedAt: null } });
           if (owned !== new Set(b.habit_ids).size) throw new api.ApiError(404, "Habit not found");
           await prisma.$transaction(
             b.habit_ids.map((id, i) => prisma.habit.update({ where: { id }, data: { routineId: b.routine_id, position: i + 1 } })),

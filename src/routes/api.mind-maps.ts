@@ -9,7 +9,7 @@ export const Route = createFileRoute("/api/mind-maps")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const rows = await api.db().mindMap.findMany({
-            where: { userId: user.id }, select: api.mindMapMetaSelect, orderBy: { updatedAt: "desc" },
+            where: { userId: user.id, deletedAt: null }, select: api.mindMapMetaSelect, orderBy: { updatedAt: "desc" },
           });
           return api.json(rows.map(api.mindMapMetaDto));
         });

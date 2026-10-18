@@ -18,6 +18,7 @@ export const Route = createFileRoute("/api/events")({
           const rows = await api.db().event.findMany({
             where: {
               userId: user.id,
+              deletedAt: null,
               OR: [
                 { recurrenceRule: null, startAt: { lte: hi }, endAt: { gte: lo } },
                 { recurrenceRule: { not: null }, startAt: { lte: hi } },

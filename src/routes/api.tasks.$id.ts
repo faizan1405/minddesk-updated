@@ -20,11 +20,11 @@ export const Route = createFileRoute("/api/tasks/$id")({
           const user = await api.requireUser(request);
           const b = Patch.parse(await api.readJson(request));
           const prisma = api.db();
-          const task = await prisma.task.findFirst({ where: { id: params.id, userId: user.id } });
+          const task = await prisma.task.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
           if (!task) throw new api.ApiError(404, "Task not found");
           if (b.list_id && b.list_id !== task.listId) {
             if (task.parentId) throw new api.ApiError(400, "Move the parent task instead");
-            const list = await prisma.taskList.findFirst({ where: { id: b.list_id, userId: user.id } });
+            const list = await prisma.taskList.findFirst({ where: { id: b.list_id, userId: user.id, deletedAt: null } });
             if (!list) throw new api.ApiError(404, "List not found");
           }
           const updated = await prisma.$transaction(async (tx) => {
@@ -48,8 +48,14 @@ export const Route = createFileRoute("/api/tasks/$id")({
         const api = await import("@/lib/server/api.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          const res = await api.db().task.deleteMany({ where: { id: params.id, userId: user.id } });
-          if (res.count === 0) throw new api.ApiError(404, "Task not found");
+          const prisma = api.db();
+          const task = await prisma.task.findFirst({ where: { id: params.id, userId: user.id, deletedAt: null } });
+          if (!task) throw new api.ApiError(404, "Task not found");
+          const now = new Date();
+          await prisma.$transaction([
+            prisma.task.update({ where: { id: task.id }, data: { deletedAt: now } }),
+            prisma.task.updateMany({ where: { parentId: task.id, userId: user.id, deletedAt: null }, data: { deletedAt: now } }),
+          ]);
           return api.json({ ok: true });
         });
       },

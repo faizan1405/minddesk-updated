@@ -19,6 +19,7 @@ describe("mobile bottom nav grouping", () => {
       "/mind-maps/m",
       "/analytics",
       "/templates",
+      "/trash",
       "/settings",
       "/profile",
     ])
