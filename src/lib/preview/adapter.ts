@@ -6,6 +6,7 @@ import { HabitInput, HabitPatch, OrderInput, RoutineInput, RoutinePatch, complet
 import { emptyContent } from "@/lib/page-content";
 import { DisplayName, SettingsPatch, parseSettings, type Settings } from "@/lib/settings-shared";
 import { DEFAULT_PLAN_CATEGORIES, activityInRange, type PlanActivity } from "@/lib/plan-shared";
+import { calculateProductivityAnalytics } from "@/lib/server/analytics-calc";
 
 type Res = { status: number; data: unknown };
 type Row = Record<string, unknown> & { id: string };
@@ -118,6 +119,40 @@ export function previewRequest(method: string, rawPath: string, body: Record<str
     });
   }
 
+  if (route === "GET /analytics") {
+    const range = (q.get("range") as "7d" | "30d" | "90d") || "30d";
+    const tz = q.get("tz") || previewSettings.time_zone || "Asia/Kolkata";
+    return ok(calculateProductivityAnalytics({
+      tasks: db.tasks.map((t) => ({
+        id: String(t.id),
+        completed: Boolean(t["completed"]),
+        completedAt: (t["completed_at"] as string) || null,
+        dueDate: (t["due_date"] as string) || null,
+        createdAt: (t["created_at"] as string) || now(),
+        updatedAt: (t["updated_at"] as string) || now(),
+      })),
+      focusSessions: db.focus.map((f) => ({
+        id: String(f.id),
+        date: String(f["date"]),
+        plannedMinutes: Number(f["planned_minutes"] ?? 25),
+        focusedSeconds: Number(f["focused_seconds"] ?? 0),
+        completed: Boolean(f["completed"]),
+        startedAt: String(f["started_at"] ?? now()),
+        endedAt: String(f["ended_at"] ?? now()),
+      })),
+      habits: db.habits.map((h) => ({
+        id: String(h.id),
+        title: String(h["title"] ?? ""),
+        color: String(h["color"] ?? "blue"),
+        repeatDays: Number(h["repeat_days"] ?? 127),
+        startDate: String(h["start_date"] ?? "2026-01-01"),
+        completions: (h["completions"] as string[]) ?? [],
+      })),
+      range,
+      timeZone: tz,
+    }));
+  }
+
   switch (route) {
     // ---- task lists ----
     case "GET /task-lists": return ok(sortPos(db.lists));
@@ -178,7 +213,7 @@ export function previewRequest(method: string, rawPath: string, body: Record<str
         projectId = parent["project_id"] as string | null;
       }
       const r = { id: uid(), project_id: projectId, parent_id: b["parent_id"] ?? null, title: String(b["title"] ?? "").trim(), position: Date.now(), version: 1, created_at: now(), updated_at: now() };
-      db.pages.push(r); db.pageContent.set(r.id, emptyContent()); return ok(r, 201);
+      db.pages.push(r); db.pageContent.set(r.id, b["content"] ?? emptyContent()); return ok(r, 201);
     }
     case "GET /pages/:x": {
       const r = find(db.pages, id); if (!r) return err(404, "Page not found");

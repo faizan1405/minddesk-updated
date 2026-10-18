@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated.analytics'
 import { Route as AuthenticatedCalendarRouteImport } from './routes/_authenticated.calendar'
 import { Route as AuthenticatedHabitsRouteImport } from './routes/_authenticated.habits'
 import { Route as AuthenticatedMindMapsRouteImport } from './routes/_authenticated.mind-maps'
@@ -22,6 +23,8 @@ import { Route as AuthenticatedProjectsRouteImport } from './routes/_authenticat
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated.settings'
 import { Route as AuthenticatedStarredRouteImport } from './routes/_authenticated.starred'
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated.tasks'
+import { Route as AuthenticatedTemplatesRouteImport } from './routes/_authenticated.templates'
+import { Route as ApiAnalyticsRouteImport } from './routes/api.analytics'
 import { Route as ApiEventsRouteImport } from './routes/api.events'
 import { Route as ApiHabitsRouteImport } from './routes/api.habits'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
@@ -81,6 +84,11 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedCalendarRoute = AuthenticatedCalendarRouteImport.update({
   id: '/calendar',
   path: '/calendar',
@@ -130,6 +138,16 @@ const AuthenticatedTasksRoute = AuthenticatedTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
   getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedTemplatesRoute = AuthenticatedTemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const ApiAnalyticsRoute = ApiAnalyticsRouteImport.update({
+  id: '/api/analytics',
+  path: '/api/analytics',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiEventsRoute = ApiEventsRouteImport.update({
   id: '/api/events',
@@ -365,6 +383,7 @@ const ApiPlanActivitiesIdExceptionsDateRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/habits': typeof AuthenticatedHabitsRoute
   '/mind-maps': typeof AuthenticatedMindMapsRouteWithChildren
@@ -375,6 +394,8 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AuthenticatedSettingsRoute
   '/starred': typeof AuthenticatedStarredRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/templates': typeof AuthenticatedTemplatesRoute
+  '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
@@ -423,6 +444,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/analytics': typeof AuthenticatedAnalyticsRoute
   '/calendar': typeof AuthenticatedCalendarRoute
   '/habits': typeof AuthenticatedHabitsRoute
   '/plan': typeof AuthenticatedPlanRoute
@@ -430,6 +452,8 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsRoute
   '/starred': typeof AuthenticatedStarredRoute
   '/tasks': typeof AuthenticatedTasksRoute
+  '/templates': typeof AuthenticatedTemplatesRoute
+  '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
@@ -479,6 +503,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/calendar': typeof AuthenticatedCalendarRoute
   '/_authenticated/habits': typeof AuthenticatedHabitsRoute
   '/_authenticated/mind-maps': typeof AuthenticatedMindMapsRouteWithChildren
@@ -489,6 +514,8 @@ export interface FileRoutesById {
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/starred': typeof AuthenticatedStarredRoute
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
+  '/_authenticated/templates': typeof AuthenticatedTemplatesRoute
+  '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
@@ -539,6 +566,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/analytics'
     | '/calendar'
     | '/habits'
     | '/mind-maps'
@@ -549,6 +577,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/starred'
     | '/tasks'
+    | '/templates'
+    | '/api/analytics'
     | '/api/events'
     | '/api/habits'
     | '/api/health'
@@ -597,6 +627,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/analytics'
     | '/calendar'
     | '/habits'
     | '/plan'
@@ -604,6 +635,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/starred'
     | '/tasks'
+    | '/templates'
+    | '/api/analytics'
     | '/api/events'
     | '/api/habits'
     | '/api/health'
@@ -652,6 +685,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/_authenticated/analytics'
     | '/_authenticated/calendar'
     | '/_authenticated/habits'
     | '/_authenticated/mind-maps'
@@ -662,6 +696,8 @@ export interface FileRouteTypes {
     | '/_authenticated/settings'
     | '/_authenticated/starred'
     | '/_authenticated/tasks'
+    | '/_authenticated/templates'
+    | '/api/analytics'
     | '/api/events'
     | '/api/habits'
     | '/api/health'
@@ -712,6 +748,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiAnalyticsRoute: typeof ApiAnalyticsRoute
   ApiEventsRoute: typeof ApiEventsRouteWithChildren
   ApiHabitsRoute: typeof ApiHabitsRouteWithChildren
   ApiHealthRoute: typeof ApiHealthRoute
@@ -758,6 +795,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/auth'
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/analytics': {
+      id: '/_authenticated/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/calendar': {
       id: '/_authenticated/calendar'
@@ -828,6 +872,20 @@ declare module '@tanstack/react-router' {
       fullPath: '/tasks'
       preLoaderRoute: typeof AuthenticatedTasksRouteImport
       parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/templates': {
+      id: '/_authenticated/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof AuthenticatedTemplatesRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/api/analytics': {
+      id: '/api/analytics'
+      path: '/api/analytics'
+      fullPath: '/api/analytics'
+      preLoaderRoute: typeof ApiAnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/events': {
       id: '/api/events'
@@ -1203,6 +1261,7 @@ const AuthenticatedProjectsRouteWithChildren =
   )
 
 interface AuthenticatedRouteChildren {
+  AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedCalendarRoute: typeof AuthenticatedCalendarRoute
   AuthenticatedHabitsRoute: typeof AuthenticatedHabitsRoute
   AuthenticatedMindMapsRoute: typeof AuthenticatedMindMapsRouteWithChildren
@@ -1213,10 +1272,12 @@ interface AuthenticatedRouteChildren {
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedStarredRoute: typeof AuthenticatedStarredRoute
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
+  AuthenticatedTemplatesRoute: typeof AuthenticatedTemplatesRoute
   AuthenticatedListsListIdRoute: typeof AuthenticatedListsListIdRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedCalendarRoute: AuthenticatedCalendarRoute,
   AuthenticatedHabitsRoute: AuthenticatedHabitsRoute,
   AuthenticatedMindMapsRoute: AuthenticatedMindMapsRouteWithChildren,
@@ -1227,6 +1288,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedStarredRoute: AuthenticatedStarredRoute,
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
+  AuthenticatedTemplatesRoute: AuthenticatedTemplatesRoute,
   AuthenticatedListsListIdRoute: AuthenticatedListsListIdRoute,
 }
 
@@ -1382,6 +1444,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiAnalyticsRoute: ApiAnalyticsRoute,
   ApiEventsRoute: ApiEventsRouteWithChildren,
   ApiHabitsRoute: ApiHabitsRouteWithChildren,
   ApiHealthRoute: ApiHealthRoute,

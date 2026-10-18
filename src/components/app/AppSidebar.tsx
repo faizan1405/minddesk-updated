@@ -5,7 +5,7 @@ import { displayNameOf, initialsOf } from "@/hooks/use-auth";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   CheckSquare, Star, List, NotebookPen, FolderKanban, CalendarDays, Clock, Network, Repeat,
-  Settings, LogOut, ChevronRight,
+  Settings, LogOut, ChevronRight, BarChart3, LayoutTemplate,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -24,6 +24,8 @@ const workspace = [
   { title: "Plan Your Day", url: "/plan", icon: Clock },
   { title: "Mind Maps", url: "/mind-maps", icon: Network },
   { title: "Habits & Routines", url: "/habits", icon: Repeat },
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Templates", url: "/templates", icon: LayoutTemplate },
 ] as const;
 
 export function AppSidebar() {

@@ -38,7 +38,7 @@ export function usePageActions() {
   const refreshProjects = () => qc.invalidateQueries({ queryKey: projectsKey });
 
   const createPage = useMutation({
-    mutationFn: (input: { parent_id?: string | null; project_id?: string | null; title?: string }) =>
+    mutationFn: (input: { parent_id?: string | null; project_id?: string | null; title?: string; content?: PageContent }) =>
       api<PageMeta>("/api/pages", { method: "POST", body: input }),
     onSuccess: (page) => {
       qc.setQueryData<PageMeta[]>(pagesKey, (old) => (old ? [...old, page] : old));

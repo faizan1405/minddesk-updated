@@ -1,10 +1,11 @@
 // User preferences: one validated JSON document per user (shared by server, preview adapter and UI).
 import { z } from "zod";
 
-export const START_PAGES = ["tasks", "starred", "notes", "projects", "calendar", "plan", "mind-maps", "habits"] as const;
+export const START_PAGES = ["tasks", "starred", "notes", "projects", "calendar", "plan", "mind-maps", "habits", "analytics", "templates"] as const;
 export const START_PAGE_LABEL: Record<(typeof START_PAGES)[number], string> = {
   tasks: "My Tasks", starred: "Starred", notes: "Notes", projects: "Projects", calendar: "Calendar",
   plan: "Plan Your Day", "mind-maps": "Mind Maps", habits: "Habits & Routines",
+  analytics: "Productivity Analytics", templates: "Template Library",
 };
 
 export function isTimeZone(tz: string) {

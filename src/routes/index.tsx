@@ -21,6 +21,7 @@ export const Route = createFileRoute("/")({
 const TARGET = {
   tasks: "/tasks", starred: "/starred", notes: "/notes", projects: "/projects", calendar: "/calendar",
   plan: "/plan", "mind-maps": "/mind-maps", habits: "/habits",
+  analytics: "/analytics", templates: "/templates",
 } as const satisfies Record<Settings["start_page"], string>;
 
 /** Opening the app at "/" goes to the start page chosen in Settings; direct links are never redirected. */

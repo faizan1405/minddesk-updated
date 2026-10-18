@@ -12,7 +12,16 @@ describe("mobile bottom nav grouping", () => {
     expect(navGroupFor("/notes/p1")).toBe("notes");
   });
   it("everything else, including settings and profile, is More", () => {
-    for (const p of ["/projects/x/y", "/calendar", "/plan", "/mind-maps/m", "/settings", "/profile"])
+    for (const p of [
+      "/projects/x/y",
+      "/calendar",
+      "/plan",
+      "/mind-maps/m",
+      "/analytics",
+      "/templates",
+      "/settings",
+      "/profile",
+    ])
       expect(navGroupFor(p)).toBe("more");
   });
 });

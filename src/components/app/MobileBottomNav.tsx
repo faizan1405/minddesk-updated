@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   CheckCircle2, Repeat, NotebookPen, LayoutGrid, FolderKanban, CalendarDays, Clock, Network,
-  Settings, UserRound, type LucideIcon,
+  Settings, UserRound, BarChart3, LayoutTemplate, type LucideIcon,
 } from "lucide-react";
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,9 @@ export function navGroupFor(path: string): NavGroup {
   return "more";
 }
 
-const moreItems: { title: string; url: "/projects" | "/calendar" | "/plan" | "/mind-maps" | "/settings" | "/profile"; icon: LucideIcon }[] = [
+const moreItems: { title: string; url: "/projects" | "/calendar" | "/plan" | "/mind-maps" | "/analytics" | "/templates" | "/settings" | "/profile"; icon: LucideIcon }[] = [
+  { title: "Analytics", url: "/analytics", icon: BarChart3 },
+  { title: "Templates", url: "/templates", icon: LayoutTemplate },
   { title: "Projects", url: "/projects", icon: FolderKanban },
   { title: "Calendar", url: "/calendar", icon: CalendarDays },
   { title: "Plan Your Day", url: "/plan", icon: Clock },
