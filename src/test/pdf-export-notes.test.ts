@@ -95,5 +95,44 @@ describe("Notes PDF Export", () => {
       const header = String.fromCharCode(...buffer.slice(0, 4));
       expect(header).toBe("%PDF");
     });
+
+    it("compiles PDF successfully with all new rich block types: h1, h2, h3, callout, code, divider", async () => {
+      const richBlocks: Block[] = [
+        { id: "h1", type: "h1", text: "Executive Summary" },
+        { id: "h2", type: "h2", text: "Key Objectives" },
+        { id: "h3", type: "h3", text: "Milestone Details" },
+        { id: "p1", type: "p", text: "Standard explanatory text." },
+        { id: "call1", type: "callout", text: "Remember to review safety protocols before deployment." },
+        { id: "code1", type: "code", text: "function launch() {\n  return true;\n}", language: "typescript" },
+        { id: "div1", type: "divider", text: "" },
+        { id: "chk1", type: "check", text: "Sign-off complete", checked: true },
+      ];
+
+      const docDef = buildNotePdfDocDefinition({
+        title: "All Rich Blocks Document",
+        blocks: richBlocks,
+      });
+
+      expect(docDef.content.length).toBeGreaterThan(6);
+
+      const pdfMake = await getPdfMake();
+      const generator = (
+        pdfMake as unknown as {
+          createPdf: (d: unknown) => { getBuffer: (cb: (b: Uint8Array) => void) => void };
+        }
+      ).createPdf(docDef);
+
+      const buffer = await new Promise<Uint8Array>((resolve, reject) => {
+        generator.getBuffer((buf: Uint8Array) => {
+          if (buf && buf.length > 0) resolve(buf);
+          else reject(new Error("Buffer empty"));
+        });
+      });
+
+      expect(buffer).toBeDefined();
+      expect(buffer.length).toBeGreaterThan(1000);
+      const header = String.fromCharCode(...buffer.slice(0, 4));
+      expect(header).toBe("%PDF");
+    });
   });
 });

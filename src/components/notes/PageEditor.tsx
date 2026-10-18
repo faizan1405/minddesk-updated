@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, FileDown, Loader2 } from "lucide-react";
+import { AlertCircle, Check, FileDown, Loader2, Network } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiRequestError } from "@/lib/api-client";
 import { setPageTitleInCache, usePage, type PageFull, type PageMeta } from "@/lib/pages";
 import type { Block } from "@/lib/page-content";
+import type { MindMapMeta } from "@/lib/mindmaps";
+import { pageContentToMindMap } from "@/lib/mindmap-bridge";
 import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import { BlockEditor } from "./BlockEditor";
 import { ErrorState, LoadingState } from "@/components/app/PageStates";
@@ -16,10 +19,15 @@ const DEBOUNCE_MS = 800;
 export function PageEditor({ pageId }: { pageId: string }) {
   const q = usePage(pageId);
   if (q.isPending) return <LoadingState />;
-  if (q.error)
-    return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
+  if (q.error) return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
   // Remount per page/version so local editing state never leaks between pages.
-  return <LoadedEditor key={`${q.data.id}:${q.dataUpdatedAt}`} page={q.data} onReload={() => q.refetch()} />;
+  return (
+    <LoadedEditor
+      key={`${q.data.id}:${q.dataUpdatedAt}`}
+      page={q.data}
+      onReload={() => q.refetch()}
+    />
+  );
 }
 
 function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void }) {
@@ -52,7 +60,11 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
     try {
       const res = await api<PageMeta>(`/api/pages/${page.id}`, {
         method: "PATCH",
-        body: { title: snapshot.title, content: { blocks: snapshot.blocks }, base_version: version.current },
+        body: {
+          title: snapshot.title,
+          content: { blocks: snapshot.blocks },
+          base_version: version.current,
+        },
       });
       version.current = res.version;
       setPageTitleInCache(qc, page.id, res.title);
@@ -115,7 +127,37 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
     };
   }, [flush]);
 
+  const navigate = useNavigate();
   const [isExporting, setIsExporting] = useState(false);
+  const [isVisualizing, setIsVisualizing] = useState(false);
+
+  const handleVisualizeMindMap = useCallback(async () => {
+    if (isVisualizing) return;
+    setIsVisualizing(true);
+    const toastId = toast.loading("Converting note to Mind Map...");
+    try {
+      if (dirty.current || inFlight.current) {
+        await flush();
+      }
+      const { doc } = pageContentToMindMap(latest.current.title, {
+        blocks: latest.current.blocks,
+      });
+      const mapRes = await api<MindMapMeta>("/api/mind-maps", {
+        method: "POST",
+        body: {
+          title: latest.current.title.trim() || "Untitled Note",
+          data: doc,
+        },
+      });
+      toast.success("Note visualized as Mind Map", { id: toastId });
+      navigate({ to: "/mind-maps/$mapId", params: { mapId: mapRes.id } });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Conversion failed";
+      toast.error(`Visualization failed: ${msg}`, { id: toastId });
+    } finally {
+      setIsVisualizing(false);
+    }
+  }, [flush, isVisualizing, navigate]);
 
   const handleExportPdf = useCallback(async () => {
     if (isExporting) return;
@@ -138,30 +180,59 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
   return (
     <div className="mx-auto w-full max-w-[720px] px-5 pb-32 pt-6 md:px-10 md:pt-10">
       <div className="mb-3 flex h-8 items-center justify-between">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleExportPdf}
-          disabled={isExporting}
-          className="h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium text-muted-foreground shadow-none transition-all hover:bg-accent hover:text-foreground active:scale-95"
-          title="Export note as PDF"
-          aria-label="Export as PDF"
-        >
-          {isExporting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          ) : (
-            <FileDown className="h-3.5 w-3.5 text-primary" />
-          )}
-          <span>Export as PDF</span>
-        </Button>
-        <SaveStatus status={status} onRetry={() => { setStatus("dirty"); void flush(); }} />
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleVisualizeMindMap}
+            disabled={isVisualizing}
+            className="h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium text-muted-foreground shadow-none transition-all hover:bg-accent hover:text-foreground active:scale-95"
+            title="Visualize note as Mind Map"
+            aria-label="Visualize as Mind Map"
+          >
+            {isVisualizing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            ) : (
+              <Network className="h-3.5 w-3.5 text-primary" />
+            )}
+            <span>Visualize as Mind Map</span>
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleExportPdf}
+            disabled={isExporting}
+            className="h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium text-muted-foreground shadow-none transition-all hover:bg-accent hover:text-foreground active:scale-95"
+            title="Export note as PDF"
+            aria-label="Export as PDF"
+          >
+            {isExporting ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+            ) : (
+              <FileDown className="h-3.5 w-3.5 text-primary" />
+            )}
+            <span>Export as PDF</span>
+          </Button>
+        </div>
+        <SaveStatus
+          status={status}
+          onRetry={() => {
+            setStatus("dirty");
+            void flush();
+          }}
+        />
       </div>
       {status === "conflict" && (
         <div className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm">
           <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
-          <span className="flex-1">This page was changed on another device. Your latest edits here were not saved.</span>
-          <Button size="sm" variant="outline" onClick={onReload}>Load latest version</Button>
+          <span className="flex-1">
+            This page was changed on another device. Your latest edits here were not saved.
+          </span>
+          <Button size="sm" variant="outline" onClick={onReload}>
+            Load latest version
+          </Button>
         </div>
       )}
       <textarea
@@ -207,7 +278,9 @@ function SaveStatus({ status, onRetry }: { status: Status; onRetry: () => void }
     return (
       <span className="flex items-center gap-2 text-xs text-destructive" aria-live="polite">
         <AlertCircle className="h-3.5 w-3.5" /> Not saved
-        <button className="font-medium underline underline-offset-2" onClick={onRetry}>Retry</button>
+        <button className="font-medium underline underline-offset-2" onClick={onRetry}>
+          Retry
+        </button>
       </span>
     );
   if (status === "conflict") return null;
