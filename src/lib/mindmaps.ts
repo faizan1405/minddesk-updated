@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { MapDoc } from "@/lib/mindmap-doc";
 
-export type MindMapMeta = { id: string; title: string; node_count: number; version: number; created_at: string; updated_at: string };
+export type MindMapMeta = { id: string; title: string; is_locked: boolean; node_count: number; version: number; created_at: string; updated_at: string };
 export type MindMapFull = MindMapMeta & { data: MapDoc };
 
 export const mapsKey = ["mind-maps"] as const;
@@ -27,6 +27,17 @@ export function useMindMapActions() {
     rename: useMutation({
       mutationFn: ({ id, title }: { id: string; title: string }) => api<MindMapMeta>(`/api/mind-maps/${id}`, { method: "PATCH", body: { title } }),
       onSuccess: refresh, onError: fail("Couldn't rename mind map"),
+    }),
+    setLocked: useMutation({
+      mutationFn: ({ id, locked }: { id: string; locked: boolean }) =>
+        api<MindMapMeta>(`/api/mind-maps/${id}`, { method: "PATCH", body: { is_locked: locked } }),
+      onSuccess: (meta) => {
+        refresh();
+        qc.setQueryData(["mind-map", meta.id], (old: MindMapFull | undefined) =>
+          old ? { ...old, is_locked: meta.is_locked, version: meta.version } : old,
+        );
+      },
+      onError: fail("Couldn't update mind map lock"),
     }),
     duplicate: useMutation({
       mutationFn: async (id: string) => {

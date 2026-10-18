@@ -24,7 +24,7 @@ export const Route = createFileRoute("/api/mind-maps")({
           const b = Create.parse(await api.readJson(request));
           const doc = b.data ?? newDoc(b.title);
           const m = await api.db().mindMap.create({
-            data: { userId: user.id, title: b.title, data: JSON.stringify(doc), nodeCount: doc.nodes.length },
+            data: { userId: user.id, title: b.title, data: JSON.stringify(doc), nodeCount: doc.nodes.length, isLocked: false },
             select: api.mindMapMetaSelect,
           });
           return api.json(api.mindMapMetaDto(m), { status: 201 });

@@ -18,7 +18,7 @@ export const textFor = (t: TextColor, c: MapColor) =>
   t === "muted" ? "var(--muted-foreground)" : t === "accent" ? "var(--primary)" : t === "dark" ? "var(--background)"
     : t === "color" ? colorVar(c) : "var(--foreground)";
 
-export type TopicData = { node: MapNode; isRoot: boolean; hiddenCount: number; childCount: number; match: boolean; drop: boolean; connecting: boolean };
+export type TopicData = { node: MapNode; isRoot: boolean; hiddenCount: number; childCount: number; match: boolean; drop: boolean; connecting: boolean; isLocked?: boolean };
 export type TopicRFNode = Node<TopicData, "topic">;
 
 type Ctx = {
@@ -28,6 +28,7 @@ type Ctx = {
   commitTitle: (id: string, title: string) => void;
   cancelEdit: () => void;
   toggleCollapse: (id: string) => void;
+  isLocked?: boolean;
 };
 export const MapCtx = createContext<Ctx | null>(null);
 
@@ -40,13 +41,15 @@ const SIZE_CLS = {
 export const TopicNode = memo(function TopicNode({ data, selected }: NodeProps<TopicRFNode>) {
   const ctx = useContext(MapCtx)!;
   const { node: n, isRoot } = data;
-  const editing = ctx.editingId === n.id;
+  const editing = !ctx.isLocked && !data.isLocked && ctx.editingId === n.id;
   const Icon = n.icon !== "none" ? ICONS[n.icon] : null;
   const accent = n.color === "default" ? (isRoot ? "var(--primary)" : "var(--border)") : colorVar(n.color);
   return (
     <div
       className={cn(
-        "mm-node relative max-w-[280px] border cursor-grab active:cursor-grabbing", SIZE_CLS[n.size],
+        "mm-node relative max-w-[280px] border",
+        !data.isLocked ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+        SIZE_CLS[n.size],
         isRoot && "min-w-[140px] border-2 text-center tracking-tight",
         isRoot && n.size === "m" && "px-6 py-3.5 text-[17px] font-semibold",
         selected && "outline-2 outline-offset-[3px] outline-primary",

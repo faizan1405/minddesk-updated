@@ -19,12 +19,15 @@ export type PanelTab = "content" | "style" | "details";
 const TEXT_LABEL = { default: "Default", muted: "Soft", accent: "Accent", color: "Branch", dark: "Dark" } as const;
 const SIZE_LABEL = { s: "Small", m: "Medium", l: "Large" } as const;
 
-export function NodePanel({ node, isRoot, childCount, actions, tab, onTab, onClose }: {
+export function NodePanel({ node, isRoot, childCount, actions, tab, onTab, onClose, readOnly = false }: {
   node: MapNode; isRoot: boolean; childCount: number; actions: NodeActions;
-  tab: PanelTab; onTab: (t: PanelTab) => void; onClose?: () => void;
+  tab: PanelTab; onTab: (t: PanelTab) => void; onClose?: () => void; readOnly?: boolean;
 }) {
   const [link, setLink] = useState(node.link);
   useEffect(() => setLink(node.link), [node.id, node.link]);
+  useEffect(() => {
+    if (readOnly && tab !== "content") onTab("content");
+  }, [readOnly, tab, onTab]);
   const linkValid = link === "" || /^https?:\/\/\S+$/i.test(link);
 
   return (
@@ -32,8 +35,8 @@ export function NodePanel({ node, isRoot, childCount, actions, tab, onTab, onClo
       <div className="mb-4 flex items-center gap-2">
         <TabsList className="h-8 flex-1">
           <TabsTrigger value="content" className="flex-1 text-xs">Content</TabsTrigger>
-          <TabsTrigger value="style" className="flex-1 text-xs">Style</TabsTrigger>
-          <TabsTrigger value="details" className="flex-1 text-xs">Actions</TabsTrigger>
+          <TabsTrigger value="style" disabled={readOnly} className="flex-1 text-xs">Style</TabsTrigger>
+          <TabsTrigger value="details" disabled={readOnly} className="flex-1 text-xs">Actions</TabsTrigger>
         </TabsList>
         {onClose && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={onClose} aria-label="Close panel"><X className="h-4 w-4" /></Button>}
       </div>
@@ -42,17 +45,20 @@ export function NodePanel({ node, isRoot, childCount, actions, tab, onTab, onClo
         <div>
           <Label htmlFor="mm-title" className="mb-2 block text-xs text-muted-foreground">Title</Label>
           <Input id="mm-title" value={node.title} maxLength={300} placeholder="New topic"
+            disabled={readOnly} readOnly={readOnly}
             onChange={(e) => actions.update({ title: e.target.value }, `title:${node.id}`)} className="font-medium" />
         </div>
         <div>
           <Label htmlFor="mm-notes" className="mb-2 block text-xs text-muted-foreground">Notes</Label>
-          <Textarea id="mm-notes" rows={4} maxLength={10000} value={node.notes} placeholder="Add notes…"
+          <Textarea id="mm-notes" rows={4} maxLength={10000} value={node.notes} placeholder={readOnly ? "No notes added." : "Add notes…"}
+            disabled={readOnly} readOnly={readOnly}
             onChange={(e) => actions.update({ notes: e.target.value }, `notes:${node.id}`)} />
         </div>
         <div>
           <Label htmlFor="mm-link" className="mb-2 block text-xs text-muted-foreground">Link</Label>
           <div className="flex gap-2">
-            <Input id="mm-link" value={link} placeholder="https://…" maxLength={2000}
+            <Input id="mm-link" value={link} placeholder={readOnly ? "No link added." : "https://…"} maxLength={2000}
+              disabled={readOnly} readOnly={readOnly}
               onChange={(e) => { setLink(e.target.value); if (/^https?:\/\/\S+$/i.test(e.target.value) || e.target.value === "") actions.update({ link: e.target.value }, `link:${node.id}`); }} />
             {node.link && (
               <Button asChild variant="outline" size="icon" aria-label="Open link">

@@ -6,8 +6,8 @@ import {
 import "@xyflow/react/dist/style.css";
 import { Link } from "@tanstack/react-router";
 import {
-  AlertCircle, ArrowLeft, Check, ChevronDown, ChevronUp, CornerDownRight, Crosshair, Download, Keyboard, LayoutGrid, Loader2,
-  Maximize, Minus, MoreHorizontal, Plus, Redo2, RotateCcw, Search, SlidersHorizontal, Trash2, Undo2, X,
+  AlertCircle, ArrowLeft, Check, ChevronDown, ChevronUp, CornerDownRight, Crosshair, Download, FileText, Keyboard, LayoutGrid, Loader2,
+  Lock, LockOpen, Maximize, Minus, MoreHorizontal, Plus, Redo2, RotateCcw, Search, SlidersHorizontal, Trash2, Undo2, X,
 } from "lucide-react";
 import { toPng, toSvg } from "html-to-image";
 import { toast } from "sonner";
@@ -29,7 +29,7 @@ import {
 import { FloatingEdge, MapCtx, TopicNode, colorVar, type TopicRFNode } from "./parts";
 import { NodePanel, type NodeActions, type PanelTab } from "./NodePanel";
 import { ContextToolbar } from "./ContextToolbar";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 const nodeTypes = { topic: TopicNode };
@@ -48,6 +48,10 @@ function Editor({ map }: { map: MindMapFull }) {
   const [doc, setDocState] = useState<MapDoc>(map.data);
   const docRef = useRef(doc);
   const [title, setTitle] = useState(map.title);
+  const [isLocked, setIsLocked] = useState(Boolean(map.is_locked));
+  const isLockedRef = useRef(isLocked);
+  isLockedRef.current = isLocked;
+  const [lockLoading, setLockLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -118,11 +122,58 @@ function Editor({ map }: { map: MindMapFull }) {
       inFlight.current = false;
       dirty.current = true;
       if (e instanceof ApiRequestError && e.status === 409) { conflict.current = true; setStatus("conflict"); }
+      else if (e instanceof ApiRequestError && e.status === 423) {
+        setIsLocked(true);
+        isLockedRef.current = true;
+        dirty.current = false;
+        setStatus("saved");
+        toast.error("This mind map is locked. Edits were not saved.");
+      }
       else setStatus("error");
     }
   }, [map.id]);
 
+  const toggleLock = async () => {
+    if (lockLoading) return;
+    const targetLocked = !isLocked;
+    if (targetLocked && (dirty.current || timer.current)) {
+      await flush();
+      if (dirty.current || conflict.current) {
+        toast.error("Please wait for pending changes to save before locking.");
+        return;
+      }
+    }
+    setLockLoading(true);
+    try {
+      const res = await api<MindMapMeta>(`/api/mind-maps/${map.id}`, {
+        method: "PATCH",
+        body: { is_locked: targetLocked },
+      });
+      setIsLocked(res.is_locked);
+      isLockedRef.current = res.is_locked;
+      if (res.is_locked) {
+        setEditingId(null);
+        setConnectFrom(null);
+        if (inspector === "style" || inspector === "details") {
+          setInspector(null);
+        }
+        toast.success("Mind map locked (read-only)");
+      } else {
+        toast.success("Mind map unlocked");
+      }
+    } catch (e) {
+      if (e instanceof ApiRequestError && e.status === 423) {
+        toast.error("Mind map is locked.");
+      } else {
+        toast.error("Failed to update lock state");
+      }
+    } finally {
+      setLockLoading(false);
+    }
+  };
+
   const setDoc = useCallback((next: MapDoc) => {
+    if (isLockedRef.current) return;
     docRef.current = next;
     setDocState(next);
     dirty.current = true;
@@ -133,6 +184,7 @@ function Editor({ map }: { map: MindMapFull }) {
 
   /** Change with undo support. Edits sharing `key` within 1.5s merge into one undo step (typing). */
   const commit = useCallback((next: MapDoc, key?: string) => {
+    if (isLockedRef.current) return;
     const now = Date.now();
     const merge = key && lastKey.current?.key === key && now - lastKey.current.t < 1500;
     if (!merge) pushHistory(docRef.current);
@@ -142,10 +194,12 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [setDoc]);
 
   const undo = useCallback(() => {
+    if (isLockedRef.current) return;
     const prev = past.current.pop(); if (!prev) return;
     future.current.push(docRef.current); lastKey.current = null; setDoc(prev); bump((x) => x + 1);
   }, [setDoc]);
   const redo = useCallback(() => {
+    if (isLockedRef.current) return;
     const next = future.current.pop(); if (!next) return;
     past.current.push(docRef.current); lastKey.current = null; setDoc(next); bump((x) => x + 1);
   }, [setDoc]);
@@ -171,15 +225,17 @@ function Editor({ map }: { map: MindMapFull }) {
     const s = sizes.current.get(n.id);
     return {
       id: n.id, type: "topic", position: { x: n.x, y: n.y }, selected: n.id === selectedId,
+      draggable: !isLocked,
       ...(s ? { measured: { width: s.w, height: s.h } } : {}),
       data: {
         node: n, isRoot: n.parentId === null, childCount: kids.get(n.id)?.length ?? 0,
         hiddenCount: n.collapsed ? branchIds(doc.nodes, n.id, kids).length - 1 : 0,
         match: matchSet.has(n.id), drop: n.id === dropTarget, connecting: !!connectFrom,
+        isLocked,
       },
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [doc.nodes, hidden, kids, selectedId, matchSet, dropTarget, connectFrom, sizeTick]);
+  }), [doc.nodes, hidden, kids, selectedId, matchSet, dropTarget, connectFrom, sizeTick, isLocked]);
 
   const rfEdges = useMemo<Edge[]>(() => {
     const out: Edge[] = [];
@@ -207,7 +263,7 @@ function Editor({ map }: { map: MindMapFull }) {
     }
     if (changed) setSizeTick((x) => x + 1);
     const g = drag.current;
-    for (const c of changes) if (c.type === "position" && c.position && g) {
+    for (const c of changes) if (c.type === "position" && c.position && g && !isLockedRef.current) {
       const d = docRef.current;
       const cur = d.nodes.find((n) => n.id === c.id); if (!cur) continue;
       const dx = c.position.x - cur.x, dy = c.position.y - cur.y;
@@ -221,6 +277,7 @@ function Editor({ map }: { map: MindMapFull }) {
   const select = (id: string | null) => { setSelectedId(id); setSelectedLink(null); };
 
   const addChild = useCallback((parentId: string) => {
+    if (isLockedRef.current) return;
     let d = docRef.current;
     const parent = d.nodes.find((n) => n.id === parentId); if (!parent) return;
     if (parent.collapsed) d = { ...d, nodes: d.nodes.map((n) => (n.id === parentId ? { ...n, collapsed: false } : n)) };
@@ -234,6 +291,7 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [commit, sizeOf]);
 
   const addSibling = useCallback((id: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     const n = d.nodes.find((x) => x.id === id); if (!n) return;
     if (!n.parentId) return addChild(id);
@@ -244,6 +302,7 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [addChild, commit, sizeOf]);
 
   const removeNode = useCallback((id: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     const n = d.nodes.find((x) => x.id === id); if (!n?.parentId) return;
     const gone = new Set(branchIds(d.nodes, id));
@@ -252,6 +311,7 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [commit]);
 
   const duplicate = useCallback((id: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     const n = d.nodes.find((x) => x.id === id); if (!n?.parentId) return;
     const ids = branchIds(d.nodes, id);
@@ -268,11 +328,13 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [commit, sizeOf]);
 
   const update = useCallback((id: string, patch: Partial<MapNode>, key?: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     commit({ ...d, nodes: d.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) }, key);
   }, [commit]);
 
   const toggleCollapse = useCallback((id: string) => {
+    if (isLockedRef.current) return;
     const n = docRef.current.nodes.find((x) => x.id === id); if (!n) return;
     update(id, { collapsed: !n.collapsed });
   }, [update]);
@@ -280,23 +342,27 @@ function Editor({ map }: { map: MindMapFull }) {
   const commitTitle = useCallback((id: string, t: string) => {
     editingRef.current = null;
     setEditingId(null);
+    if (isLockedRef.current) return;
     const n = docRef.current.nodes.find((x) => x.id === id);
     if (n && n.title !== t) update(id, { title: t || (n.parentId ? "New topic" : "Central topic") });
     wrapRef.current?.focus();
   }, [update]);
 
   const doArrange = useCallback((branch?: string) => {
+    if (isLockedRef.current) return;
     commit(arrange(docRef.current, sizeOf, branch));
     toast.success(branch ? "Branch arranged" : "Map arranged", { action: { label: "Undo", onClick: undo } });
   }, [commit, sizeOf, undo]);
 
   const setLayout = (l: Layout) => {
+    if (isLockedRef.current) return;
     commit(arrange({ ...docRef.current, layout: l }, sizeOf));
     setTimeout(() => rf.fitView({ padding: 0.2, duration: 300 }), 50);
     toast.success(`Layout: ${LAYOUT_LABEL[l]}`, { action: { label: "Undo", onClick: undo } });
   };
 
   const addLink = (source: string, target: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     setConnectFrom(null);
     if (source === target) return;
@@ -306,6 +372,7 @@ function Editor({ map }: { map: MindMapFull }) {
     commit({ ...d, links: [...d.links, { id: newId(), source, target }] });
   };
   const removeLink = (id: string) => {
+    if (isLockedRef.current) return;
     const d = docRef.current;
     commit({ ...d, links: d.links.filter((l) => l.id !== id) });
     setSelectedLink(null);
@@ -313,12 +380,14 @@ function Editor({ map }: { map: MindMapFull }) {
 
   // ---------- drag: moves the whole branch (Alt/Option = only this topic); drop on a topic to reparent ----------
   const onNodeDragStart: OnNodeDrag<TopicRFNode> = (e, node) => {
+    if (isLockedRef.current) return;
     pushHistory(docRef.current); lastKey.current = null;
     const alt = "altKey" in e && (e as MouseEvent).altKey;
     drag.current = { ids: new Set(alt ? [node.id] : branchIds(docRef.current.nodes, node.id)), moved: false };
     select(node.id); setDragging(true);
   };
   const onNodeDrag: OnNodeDrag<TopicRFNode> = (e, node) => {
+    if (isLockedRef.current) return;
     const g = drag.current; if (!g) return;
     const cur = docRef.current.nodes.find((n) => n.id === node.id);
     if (!cur?.parentId) return;
@@ -331,6 +400,7 @@ function Editor({ map }: { map: MindMapFull }) {
     if (t !== dropRef.current) { dropRef.current = t; setDropTarget(t); }
   };
   const onNodeDragStop: OnNodeDrag<TopicRFNode> = (_e, node) => {
+    if (isLockedRef.current) { drag.current = null; setDragging(false); return; }
     const g = drag.current; drag.current = null; setDragging(false);
     const target = dropRef.current; dropRef.current = null; setDropTarget(null);
     if (!g) return;
@@ -406,6 +476,13 @@ function Editor({ map }: { map: MindMapFull }) {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (isLockedRef.current) {
+        // Locked mode: Only navigation/view shortcuts are permitted
+        const mod = e.metaKey || e.ctrlKey;
+        if (mod && e.key.toLowerCase() === "f") { e.preventDefault(); document.getElementById("mm-search")?.focus(); return; }
+        if (e.key === "Escape") { select(null); setInspector(null); return; }
+        return;
+      }
       if (editingRef.current) {
         // The new topic's text box mounts a moment after Tab/Enter; buffer keys typed meanwhile.
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -434,6 +511,7 @@ function Editor({ map }: { map: MindMapFull }) {
   });
 
   const renameMap = async () => {
+    if (isLockedRef.current) return;
     const t = title.trim();
     if (!t) { setTitle(map.title); return; }
     try { await api(`/api/mind-maps/${map.id}`, { method: "PATCH", body: { title: t } }); }
@@ -455,15 +533,53 @@ function Editor({ map }: { map: MindMapFull }) {
       <div className="flex flex-wrap items-center gap-1.5 border-b bg-background px-2 py-2 md:px-3">
         <Button asChild variant="ghost" size="icon" aria-label="Back to mind maps"><Link to="/mind-maps"><ArrowLeft className="h-4 w-4" /></Link></Button>
         <Input value={title} maxLength={200} aria-label="Mind map name" onChange={(e) => setTitle(e.target.value)} onBlur={renameMap}
+          disabled={isLocked} readOnly={isLocked}
           onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-          className="h-8 w-36 border-transparent bg-transparent font-medium shadow-none hover:border-border md:w-56" />
-        <SaveBadge status={status} onRetry={() => { setStatus("saving"); void flush(); }} />
+          className={cn("h-8 w-36 border-transparent bg-transparent font-medium shadow-none md:w-56", !isLocked ? "hover:border-border" : "cursor-default opacity-85")} />
+        {isLocked ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400 select-none">
+            <Lock className="h-3 w-3" />
+            <span>Locked</span>
+          </span>
+        ) : (
+          <SaveBadge status={status} onRetry={() => { setStatus("saving"); void flush(); }} />
+        )}
         <div className="ml-auto flex items-center gap-1">
-          <Button variant="ghost" size="icon" title="Undo (Ctrl/⌘+Z)" aria-label="Undo" onClick={undo} disabled={!past.current.length}><Undo2 className="h-4 w-4" /></Button>
-          <Button variant="ghost" size="icon" title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo" onClick={redo} disabled={!future.current.length}><Redo2 className="h-4 w-4" /></Button>
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={isLocked ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-label={isLocked ? "Unlock Mind Map" : "Lock Mind Map"}
+                  title={isLocked ? "Unlock Mind Map" : "Lock Mind Map"}
+                  disabled={lockLoading}
+                  onClick={toggleLock}
+                  className={cn(
+                    "relative transition-all duration-200",
+                    isLocked && "border border-amber-500/30 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                  )}
+                >
+                  {lockLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : isLocked ? (
+                    <Lock className="h-4 w-4 transition-transform duration-200" />
+                  ) : (
+                    <LockOpen className="h-4 w-4 text-muted-foreground transition-transform duration-200" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isLocked ? "Unlock Mind Map" : "Lock Mind Map"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <Button variant="ghost" size="icon" title="Undo (Ctrl/⌘+Z)" aria-label="Undo" onClick={undo} disabled={isLocked || !past.current.length}><Undo2 className="h-4 w-4" /></Button>
+          <Button variant="ghost" size="icon" title="Redo (Ctrl/⌘+Shift+Z)" aria-label="Redo" onClick={redo} disabled={isLocked || !future.current.length}><Redo2 className="h-4 w-4" /></Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="secondary" size="sm" className="gap-1.5"><LayoutGrid className="h-4 w-4" /><span className="hidden sm:inline">Auto arrange</span></Button>
+              <Button variant="secondary" size="sm" className="gap-1.5" disabled={isLocked}><LayoutGrid className="h-4 w-4" /><span className="hidden sm:inline">Auto arrange</span></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
               <DropdownMenuItem onSelect={() => doArrange()}>Arrange whole map</DropdownMenuItem>
@@ -501,11 +617,12 @@ function Editor({ map }: { map: MindMapFull }) {
           <ReactFlow className="mm-canvas"
             nodes={rfNodes} edges={rfEdges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} colorMode="dark"
             onNodesChange={onNodesChange}
-            onNodeClick={(_e, n) => { if (connectFrom) addLink(connectFrom, n.id); else select(n.id); }}
-            onNodeDoubleClick={(_e, n) => { select(n.id); setEditingId(n.id); }}
+            onNodeClick={(_e, n) => { if (connectFrom && !isLocked) addLink(connectFrom, n.id); else select(n.id); }}
+            onNodeDoubleClick={(_e, n) => { select(n.id); if (!isLocked) setEditingId(n.id); else setInspector("content"); }}
             onEdgeClick={(_e, ed) => { if (!ed.id.startsWith("t-")) { setSelectedLink(ed.id); setSelectedId(null); } }}
             onPaneClick={() => { select(null); setConnectFrom(null); setInspector(null); }}
             onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
+            nodesDraggable={!isLocked}
             nodesConnectable={false} elementsSelectable={false} selectNodesOnDrag={false} nodeDragThreshold={4}
             zoomOnDoubleClick={false} deleteKeyCode={null} selectionKeyCode={null} multiSelectionKeyCode={null}
             minZoom={0.15} maxZoom={2.5} fitView fitViewOptions={{ padding: 0.25, maxZoom: 1.1, minZoom: 0.35 }}
@@ -553,35 +670,53 @@ function Editor({ map }: { map: MindMapFull }) {
         {selectedLink && (
           <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border bg-popover px-3 py-1.5 text-sm shadow-lg">
             Connection selected
-            <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-destructive hover:text-destructive" onClick={() => removeLink(selectedLink)}><Trash2 className="h-4 w-4" />Remove</Button>
+            {!isLocked && (
+              <Button size="sm" variant="ghost" className="h-7 gap-1.5 text-destructive hover:text-destructive" onClick={() => removeLink(selectedLink)}><Trash2 className="h-4 w-4" />Remove</Button>
+            )}
           </div>
         )}
 
         {/* floating quick actions (desktop) */}
-        {!isMobile && sel && actions && !inspector && !connectFrom && !dragging && editingId !== sel.id && (
+        {!isMobile && sel && actions && !inspector && !connectFrom && !dragging && editingId !== sel.id && !isLocked && (
           <TooltipProvider delayDuration={300}>
             <ContextToolbar key={sel.id} node={sel} isRoot={!sel.parentId} childCount={kids.get(sel.id)?.length ?? 0} actions={actions}
               onEdit={() => setEditingId(sel.id)} onInspect={setInspector} container={wrapRef.current} reservedRight={inspector ? 312 : 0} />
           </TooltipProvider>
         )}
 
+        {/* desktop read-only action button when locked */}
+        {!isMobile && sel && !inspector && !connectFrom && isLocked && (
+          <div className="mm-fade-in absolute bottom-3 right-3 z-10">
+            <Button variant="secondary" size="sm" onClick={() => setInspector("content")} className="gap-1.5 shadow-md border">
+              <FileText className="h-4 w-4" />
+              View notes & details
+            </Button>
+          </div>
+        )}
+
         {/* desktop inspector — closed by default, opened from the toolbar */}
         {!isMobile && sel && actions && inspector && !connectFrom && (
           <div className="mm-fade-in absolute bottom-3 right-3 top-3 z-10 w-[296px] overflow-y-auto rounded-2xl border bg-card/95 p-4 shadow-xl backdrop-blur">
             <NodePanel node={sel} isRoot={!sel.parentId} childCount={kids.get(sel.id)?.length ?? 0} actions={actions}
-              tab={inspector} onTab={setInspector} onClose={() => setInspector(null)} />
+              tab={inspector} onTab={setInspector} onClose={() => setInspector(null)} readOnly={isLocked} />
           </div>
         )}
 
         {/* mobile action bar */}
         {isMobile && sel && actions && !connectFrom && !editingId && (
-          <div className="mm-fade-in absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center justify-around rounded-2xl border bg-popover/95 p-1.5 shadow-lg backdrop-blur">
-            <MobileBtn label="Child" onClick={actions.addChild}><CornerDownRight className="h-5 w-5" /></MobileBtn>
-            <MobileBtn label="Sibling" onClick={actions.addSibling} disabled={!sel.parentId}><Plus className="h-5 w-5" /></MobileBtn>
-            <MobileBtn label="Rename" onClick={() => setEditingId(sel.id)}><span className="text-base font-semibold leading-none">Aa</span></MobileBtn>
-            <MobileBtn label="Style" onClick={() => setInspector("style")}><SlidersHorizontal className="h-5 w-5" /></MobileBtn>
-            <MobileBtn label="More" onClick={() => setInspector("details")}><MoreHorizontal className="h-5 w-5" /></MobileBtn>
-          </div>
+          isLocked ? (
+            <div className="mm-fade-in absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center justify-center rounded-2xl border bg-popover/95 p-1.5 shadow-lg backdrop-blur">
+              <MobileBtn label="Notes & Details" onClick={() => setInspector("content")}><FileText className="h-5 w-5" /></MobileBtn>
+            </div>
+          ) : (
+            <div className="mm-fade-in absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] flex items-center justify-around rounded-2xl border bg-popover/95 p-1.5 shadow-lg backdrop-blur">
+              <MobileBtn label="Child" onClick={actions.addChild}><CornerDownRight className="h-5 w-5" /></MobileBtn>
+              <MobileBtn label="Sibling" onClick={actions.addSibling} disabled={!sel.parentId}><Plus className="h-5 w-5" /></MobileBtn>
+              <MobileBtn label="Rename" onClick={() => setEditingId(sel.id)}><span className="text-base font-semibold leading-none">Aa</span></MobileBtn>
+              <MobileBtn label="Style" onClick={() => setInspector("style")}><SlidersHorizontal className="h-5 w-5" /></MobileBtn>
+              <MobileBtn label="More" onClick={() => setInspector("details")}><MoreHorizontal className="h-5 w-5" /></MobileBtn>
+            </div>
+          )
         )}
       </div>
 
@@ -589,7 +724,7 @@ function Editor({ map }: { map: MindMapFull }) {
         <Sheet open={!!inspector && !!sel} onOpenChange={(o) => !o && setInspector(null)}>
           <SheetContent side="bottom" className="max-h-[80dvh] overflow-y-auto rounded-t-2xl">
             <SheetHeader className="mb-2 p-0"><SheetTitle className="text-sm">{sel?.title || "Topic"}</SheetTitle></SheetHeader>
-            {sel && actions && inspector && <NodePanel node={sel} isRoot={!sel.parentId} childCount={kids.get(sel.id)?.length ?? 0} actions={actions} tab={inspector} onTab={setInspector} />}
+            {sel && actions && inspector && <NodePanel node={sel} isRoot={!sel.parentId} childCount={kids.get(sel.id)?.length ?? 0} actions={actions} tab={inspector} onTab={setInspector} readOnly={isLocked} />}
           </SheetContent>
         </Sheet>
       )}

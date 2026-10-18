@@ -307,10 +307,10 @@ export async function activityData(raw: unknown, userId: string) {
 // ---------- mind maps ----------
 import type { MindMap as DbMap } from "@prisma/client";
 export const mindMapMetaDto = (m: Omit<DbMap, "data">) => ({
-  id: m.id, title: m.title, node_count: m.nodeCount, version: m.version,
+  id: m.id, title: m.title, is_locked: Boolean(m.isLocked), node_count: m.nodeCount, version: m.version,
   created_at: m.createdAt.toISOString(), updated_at: m.updatedAt.toISOString(),
 });
-export const mindMapMetaSelect = { id: true, userId: true, title: true, nodeCount: true, version: true, createdAt: true, updatedAt: true } as const;
+export const mindMapMetaSelect = { id: true, userId: true, title: true, isLocked: true, nodeCount: true, version: true, createdAt: true, updatedAt: true } as const;
 
 // ---------- habits & routines ----------
 import type { Habit as DbHabit, Routine as DbRoutine } from "@prisma/client";

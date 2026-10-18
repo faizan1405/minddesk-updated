@@ -233,6 +233,7 @@ model MindMap {
   userId    String   @map("user_id") @db.Char(36)
   title     String   @db.VarChar(200)
   data      String   @db.LongText
+  isLocked  Boolean  @default(false) @map("is_locked")
   nodeCount Int      @default(1) @map("node_count")
   version   Int      @default(1)
   createdAt DateTime @default(now()) @map("created_at")

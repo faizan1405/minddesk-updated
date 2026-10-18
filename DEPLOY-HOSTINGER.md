@@ -37,9 +37,10 @@ Create a database and user, note host, name, user and password.
 
 ## 3. Create the tables (once, and after future schema changes)
 Run `npm run db:migrate` (Prisma `migrate deploy`) from Hostinger's terminal/SSH,
-or import the SQL files in `prisma/migrations/` with phpMyAdmin, in order (0001, 0002, 0003, 0004, 0005, 0006, then 0007).
+or import the SQL files in `prisma/migrations/` with phpMyAdmin, in order (0001, 0002, 0003, 0004, 0005, 0006, 0007, then 0008).
 Migration 0006 (`0006_habits_routines`) adds the `routines`, `habits` and `habit_completions` tables; existing data is untouched.
 Migration 0007 (`0007_settings`) adds a `display_name` column to `users` and a `user_settings` table for preferences; existing data is untouched.
+Migration 0008 (`0008_mind_map_lock`) adds an `is_locked` column to `mind_maps` (`ALTER TABLE mind_maps ADD COLUMN is_locked BOOLEAN NOT NULL DEFAULT false;`); existing mind maps remain unlocked by default.
 
 ## 4. HTTPS
 Enable SSL for the domain in hPanel. In production the session cookie is `Secure`, so the site must use HTTPS.

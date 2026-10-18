@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { MoreHorizontal, Network, Plus, Search, Upload } from "lucide-react";
+import { Lock, LockOpen, MoreHorizontal, Network, Plus, Search, Upload } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -150,14 +150,21 @@ function MindMapsHome() {
 }
 
 function MapCard({ map }: { map: MindMapMeta }) {
-  const { rename, duplicate, remove } = useMindMapActions();
+  const { rename, duplicate, remove, setLocked } = useMindMapActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   return (
     <div className="group relative rounded-2xl border bg-card transition-colors hover:border-primary/40">
       <Link to="/mind-maps/$mapId" params={{ mapId: map.id }} className="block p-5 pr-12">
         <Network className="mb-4 h-5 w-5 text-primary" />
-        <div className="truncate font-medium">{map.title}</div>
+        <div className="flex items-center gap-1.5 font-medium">
+          <span className="truncate">{map.title}</span>
+          {map.is_locked && (
+            <span title="Locked (read-only)">
+              <Lock className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-label="Locked" />
+            </span>
+          )}
+        </div>
         <div className="mt-1 text-xs text-muted-foreground">
           {map.node_count} topic{map.node_count === 1 ? "" : "s"} · updated{" "}
           {formatDistanceToNow(new Date(map.updated_at), { addSuffix: true })}
@@ -175,10 +182,14 @@ function MapCard({ map }: { map: MindMapMeta }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setLocked.mutate({ id: map.id, locked: !map.is_locked })}>
+            {map.is_locked ? "Unlock" : "Lock"}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={map.is_locked} onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => duplicate.mutate(map.id)}>Duplicate</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            disabled={map.is_locked}
             className="text-destructive focus:text-destructive"
             onSelect={() => setDeleting(true)}
           >
