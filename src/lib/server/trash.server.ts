@@ -1,14 +1,7 @@
 import { db, ApiError } from "@/lib/server/api.server";
 
 export type TrashItemType =
-  | "note"
-  | "task"
-  | "task_list"
-  | "project"
-  | "mind_map"
-  | "event"
-  | "habit"
-  | "routine";
+  "note" | "task" | "task_list" | "project" | "mind_map" | "event" | "habit" | "routine";
 
 export type TrashFilter = "all" | "note" | "task" | "project" | "mind_map" | "calendar" | "habit";
 
@@ -48,47 +41,53 @@ export async function listTrash(
 ): Promise<{ items: TrashItem[]; counts: Record<TrashFilter, number> }> {
   const prisma = db();
 
-  const [taskLists, tasks, projects, pages, events, mindMaps, routines, habits] = await Promise.all([
-    prisma.taskList.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { tasks: { select: { id: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.task.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { list: { select: { title: true } }, parent: { select: { title: true } }, subtasks: { select: { id: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.project.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { pages: { select: { id: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.page.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { project: { select: { title: true } }, parent: { select: { title: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.event.findMany({
-      where: { userId, deletedAt: { not: null } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.mindMap.findMany({
-      where: { userId, deletedAt: { not: null } },
-      select: { id: true, title: true, deletedAt: true, isLocked: true, nodeCount: true },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.routine.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { habits: { select: { id: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-    prisma.habit.findMany({
-      where: { userId, deletedAt: { not: null } },
-      include: { routine: { select: { title: true } } },
-      orderBy: { deletedAt: "desc" },
-    }),
-  ]);
+  const [taskLists, tasks, projects, pages, events, mindMaps, routines, habits] = await Promise.all(
+    [
+      prisma.taskList.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: { tasks: { select: { id: true } } },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.task.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: {
+          list: { select: { title: true } },
+          parent: { select: { title: true } },
+          subtasks: { select: { id: true } },
+        },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.project.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: { pages: { select: { id: true } } },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.page.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: { project: { select: { title: true } }, parent: { select: { title: true } } },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.event.findMany({
+        where: { userId, deletedAt: { not: null } },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.mindMap.findMany({
+        where: { userId, deletedAt: { not: null } },
+        select: { id: true, title: true, deletedAt: true, isLocked: true, nodeCount: true },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.routine.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: { habits: { select: { id: true } } },
+        orderBy: { deletedAt: "desc" },
+      }),
+      prisma.habit.findMany({
+        where: { userId, deletedAt: { not: null } },
+        include: { routine: { select: { title: true } } },
+        orderBy: { deletedAt: "desc" },
+      }),
+    ],
+  );
 
   const allItems: TrashItem[] = [];
 
@@ -244,7 +243,8 @@ export async function listTrash(
   if (search && search.trim()) {
     const q = search.trim().toLowerCase();
     filtered = filtered.filter(
-      (i) => i.title.toLowerCase().includes(q) || (i.details && i.details.toLowerCase().includes(q)),
+      (i) =>
+        i.title.toLowerCase().includes(q) || (i.details && i.details.toLowerCase().includes(q)),
     );
   }
 
@@ -254,17 +254,26 @@ export async function listTrash(
 /**
  * Restores a single trashed item and its related child items safely.
  */
-export async function restoreItem(userId: string, type: TrashItemType, id: string): Promise<{ success: boolean; id: string; type: TrashItemType }> {
+export async function restoreItem(
+  userId: string,
+  type: TrashItemType,
+  id: string,
+): Promise<{ success: boolean; id: string; type: TrashItemType }> {
   const prisma = db();
 
   switch (type) {
     case "task_list": {
-      const list = await prisma.taskList.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const list = await prisma.taskList.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!list) throw new ApiError(404, "Task list not found in Recycle Bin");
 
       await prisma.$transaction(async (tx) => {
         await tx.taskList.update({ where: { id: list.id }, data: { deletedAt: null } });
-        await tx.task.updateMany({ where: { listId: list.id, userId, deletedAt: { not: null } }, data: { deletedAt: null } });
+        await tx.task.updateMany({
+          where: { listId: list.id, userId, deletedAt: { not: null } },
+          data: { deletedAt: null },
+        });
       });
       return { success: true, id, type };
     }
@@ -280,9 +289,14 @@ export async function restoreItem(userId: string, type: TrashItemType, id: strin
         const list = await tx.taskList.findFirst({ where: { id: task.listId, userId } });
         if (!list) {
           // Parent list missing: recover to first active list or create a default list
-          let fallback = await tx.taskList.findFirst({ where: { userId, deletedAt: null }, orderBy: { position: "asc" } });
+          let fallback = await tx.taskList.findFirst({
+            where: { userId, deletedAt: null },
+            orderBy: { position: "asc" },
+          });
           if (!fallback) {
-            fallback = await tx.taskList.create({ data: { userId, title: "My Tasks", position: 1 } });
+            fallback = await tx.taskList.create({
+              data: { userId, title: "My Tasks", position: 1 },
+            });
           }
           targetListId = fallback.id;
         } else if (list.deletedAt !== null) {
@@ -315,12 +329,17 @@ export async function restoreItem(userId: string, type: TrashItemType, id: strin
     }
 
     case "project": {
-      const project = await prisma.project.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const project = await prisma.project.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!project) throw new ApiError(404, "Project not found in Recycle Bin");
 
       await prisma.$transaction(async (tx) => {
         await tx.project.update({ where: { id: project.id }, data: { deletedAt: null } });
-        await tx.page.updateMany({ where: { projectId: project.id, userId, deletedAt: { not: null } }, data: { deletedAt: null } });
+        await tx.page.updateMany({
+          where: { projectId: project.id, userId, deletedAt: { not: null } },
+          data: { deletedAt: null },
+        });
       });
       return { success: true, id, type };
     }
@@ -378,7 +397,9 @@ export async function restoreItem(userId: string, type: TrashItemType, id: strin
     }
 
     case "mind_map": {
-      const map = await prisma.mindMap.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const map = await prisma.mindMap.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!map) throw new ApiError(404, "Mind map not found in Recycle Bin");
 
       await prisma.mindMap.update({ where: { id: map.id }, data: { deletedAt: null } });
@@ -394,18 +415,25 @@ export async function restoreItem(userId: string, type: TrashItemType, id: strin
     }
 
     case "routine": {
-      const routine = await prisma.routine.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const routine = await prisma.routine.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!routine) throw new ApiError(404, "Routine not found in Recycle Bin");
 
       await prisma.$transaction(async (tx) => {
         await tx.routine.update({ where: { id: routine.id }, data: { deletedAt: null } });
-        await tx.habit.updateMany({ where: { routineId: routine.id, userId, deletedAt: { not: null } }, data: { deletedAt: null } });
+        await tx.habit.updateMany({
+          where: { routineId: routine.id, userId, deletedAt: { not: null } },
+          data: { deletedAt: null },
+        });
       });
       return { success: true, id, type };
     }
 
     case "habit": {
-      const habit = await prisma.habit.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const habit = await prisma.habit.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!habit) throw new ApiError(404, "Habit not found in Recycle Bin");
 
       await prisma.$transaction(async (tx) => {
@@ -435,7 +463,10 @@ export async function restoreItem(userId: string, type: TrashItemType, id: strin
 /**
  * Restores all items in the Recycle Bin (or matching a filter category) for the user.
  */
-export async function restoreAll(userId: string, filter: TrashFilter = "all"): Promise<{ restoredCount: number }> {
+export async function restoreAll(
+  userId: string,
+  filter: TrashFilter = "all",
+): Promise<{ restoredCount: number }> {
   const { items } = await listTrash(userId, filter);
   let count = 0;
 
@@ -455,36 +486,81 @@ export async function restoreAll(userId: string, filter: TrashFilter = "all"): P
  * Permanently removes a single item from the database.
  * Respects Mind Map Lock protection.
  */
-export async function permanentlyDeleteItem(userId: string, type: TrashItemType, id: string): Promise<{ success: boolean; id: string }> {
+export async function permanentlyDeleteItem(
+  userId: string,
+  type: TrashItemType,
+  id: string,
+): Promise<{ success: boolean; id: string }> {
   const prisma = db();
 
   switch (type) {
     case "task_list": {
-      const res = await prisma.taskList.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
+      // Reparent any active tasks to user's fallback list before deleting the task list
+      const activeTasks = await prisma.task.findMany({
+        where: { listId: id, deletedAt: null },
+        select: { id: true },
+      });
+      if (activeTasks.length > 0) {
+        let fallback = await prisma.taskList.findFirst({
+          where: { userId, deletedAt: null },
+          orderBy: { position: "asc" },
+        });
+        if (!fallback) {
+          fallback = await prisma.taskList.create({
+            data: { userId, title: "My Tasks", position: 1 },
+          });
+        }
+        await prisma.task.updateMany({
+          where: { id: { in: activeTasks.map((t) => t.id) } },
+          data: { listId: fallback.id },
+        });
+      }
+      const res = await prisma.taskList.deleteMany({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
 
     case "task": {
+      // Reparent any active subtasks so MySQL foreign key cascade does not delete them
+      await prisma.task.updateMany({
+        where: { parentId: id, deletedAt: null },
+        data: { parentId: null },
+      });
       const res = await prisma.task.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
 
     case "project": {
-      const res = await prisma.project.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
+      // Reparent any active pages to standalone notes so MySQL foreign key cascade does not delete them
+      await prisma.page.updateMany({
+        where: { projectId: id, deletedAt: null },
+        data: { projectId: null },
+      });
+      const res = await prisma.project.deleteMany({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
 
     case "note": {
+      // Reparent any active subpages so MySQL foreign key cascade does not delete them
+      await prisma.page.updateMany({
+        where: { parentId: id, deletedAt: null },
+        data: { parentId: null },
+      });
       const res = await prisma.page.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
 
     case "mind_map": {
-      const map = await prisma.mindMap.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const map = await prisma.mindMap.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!map) throw new ApiError(404, "Item not found in Recycle Bin");
       if (map.isLocked) {
         throw new ApiError(423, "423 Locked — Unlock this mind map before permanently deleting.");
@@ -494,23 +570,31 @@ export async function permanentlyDeleteItem(userId: string, type: TrashItemType,
     }
 
     case "event": {
-      const res = await prisma.event.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
+      const res = await prisma.event.deleteMany({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
 
     case "routine": {
-      const routine = await prisma.routine.findFirst({ where: { id, userId, deletedAt: { not: null } } });
+      const routine = await prisma.routine.findFirst({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (!routine) throw new ApiError(404, "Item not found in Recycle Bin");
       await prisma.$transaction([
-        prisma.habit.deleteMany({ where: { routineId: routine.id, userId, deletedAt: { not: null } } }),
+        prisma.habit.deleteMany({
+          where: { routineId: routine.id, userId, deletedAt: { not: null } },
+        }),
         prisma.routine.delete({ where: { id: routine.id } }),
       ]);
       return { success: true, id };
     }
 
     case "habit": {
-      const res = await prisma.habit.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
+      const res = await prisma.habit.deleteMany({
+        where: { id, userId, deletedAt: { not: null } },
+      });
       if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
       return { success: true, id };
     }
@@ -523,7 +607,10 @@ export async function permanentlyDeleteItem(userId: string, type: TrashItemType,
 /**
  * Permanently deletes all items in Recycle Bin for the given user, respecting locked mind maps.
  */
-export async function emptyTrash(userId: string, filter: TrashFilter = "all"): Promise<{ deletedCount: number; lockedSkipped: number }> {
+export async function emptyTrash(
+  userId: string,
+  filter: TrashFilter = "all",
+): Promise<{ deletedCount: number; lockedSkipped: number }> {
   const { items } = await listTrash(userId, filter);
   let deletedCount = 0;
   let lockedSkipped = 0;
@@ -566,12 +653,115 @@ export async function cleanupExpiredTrash(options?: { simulatedCutoff?: Date }):
   const cutoff = options?.simulatedCutoff ?? getExpirationCutoff(RETENTION_DAYS);
   const whereExpired = { deletedAt: { lte: cutoff } };
 
-  // Run in transaction to maintain referential consistency
+  // Run in transaction to maintain referential consistency and prevent cascade deletions of active children
   const result = await prisma.$transaction(async (tx) => {
+    // -------------------------------------------------------------------------
+    // Phase 1: Reparent and preserve active/restored child records BEFORE
+    // permanently deleting their expired parents.
+    // -------------------------------------------------------------------------
+
+    // 1. Pages (subpages): Protect active or non-expired child pages of expired parent pages
+    const expiredPages = await tx.page.findMany({
+      where: whereExpired,
+      select: { id: true },
+    });
+    const expiredPageIds = expiredPages.map((p) => p.id);
+
+    if (expiredPageIds.length > 0) {
+      await tx.page.updateMany({
+        where: {
+          parentId: { in: expiredPageIds },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: cutoff } }],
+        },
+        data: { parentId: null },
+      });
+    }
+
+    // 2. Projects: Protect active or non-expired notes inside expired projects by converting them to standalone notes
+    const expiredProjects = await tx.project.findMany({
+      where: whereExpired,
+      select: { id: true },
+    });
+    const expiredProjectIds = expiredProjects.map((p) => p.id);
+
+    if (expiredProjectIds.length > 0) {
+      await tx.page.updateMany({
+        where: {
+          projectId: { in: expiredProjectIds },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: cutoff } }],
+        },
+        data: { projectId: null },
+      });
+    }
+
+    // 3. Tasks (subtasks): Protect active or non-expired subtasks of expired parent tasks
+    const expiredTasks = await tx.task.findMany({
+      where: whereExpired,
+      select: { id: true },
+    });
+    const expiredTaskIds = expiredTasks.map((t) => t.id);
+
+    if (expiredTaskIds.length > 0) {
+      await tx.task.updateMany({
+        where: {
+          parentId: { in: expiredTaskIds },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: cutoff } }],
+        },
+        data: { parentId: null },
+      });
+    }
+
+    // 4. Task Lists: Protect active or non-expired tasks inside expired task lists by moving them to an active fallback list
+    const expiredLists = await tx.taskList.findMany({
+      where: whereExpired,
+      select: { id: true, userId: true },
+    });
+
+    if (expiredLists.length > 0) {
+      const expiredListIds = expiredLists.map((l) => l.id);
+
+      const tasksToProtect = await tx.task.findMany({
+        where: {
+          listId: { in: expiredListIds },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: cutoff } }],
+        },
+        select: { id: true, userId: true },
+      });
+
+      if (tasksToProtect.length > 0) {
+        const userTasks = new Map<string, string[]>();
+        for (const t of tasksToProtect) {
+          const ids = userTasks.get(t.userId) || [];
+          ids.push(t.id);
+          userTasks.set(t.userId, ids);
+        }
+
+        for (const [uid, taskIds] of userTasks.entries()) {
+          let fallbackList = await tx.taskList.findFirst({
+            where: { userId: uid, deletedAt: null },
+            orderBy: { position: "asc" },
+          });
+          if (!fallbackList) {
+            fallbackList = await tx.taskList.create({
+              data: { userId: uid, title: "My Tasks", position: 1 },
+            });
+          }
+          await tx.task.updateMany({
+            where: { id: { in: taskIds } },
+            data: { listId: fallbackList.id },
+          });
+        }
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Phase 2: Permanently delete expired records
+    // -------------------------------------------------------------------------
+
     // 1. Habits (deleting habit cascades completions)
     const habitsRes = await tx.habit.deleteMany({ where: whereExpired });
 
-    // 2. Routines (any habits still referencing expired routines are unlinked if not already deleted)
+    // 2. Routines (habits have onDelete: SetNull in schema)
     const routinesRes = await tx.routine.deleteMany({ where: whereExpired });
 
     // 3. Tasks (subtasks cascade)
