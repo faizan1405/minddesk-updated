@@ -640,6 +640,7 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
           findFirst: vi.fn().mockResolvedValue(lockedMap),
           delete: vi.fn(),
         },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -673,6 +674,7 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
           findFirst: vi.fn().mockResolvedValue(unlockedMap),
           delete: vi.fn().mockResolvedValue(unlockedMap),
         },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -699,11 +701,15 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
             .mockResolvedValue([
               { id: "tl_1", userId: mockUser.id, title: "List", deletedAt, tasks: [] },
             ]),
-          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findFirst: vi.fn().mockResolvedValue({ id: "tl_1", userId: mockUser.id, deletedAt }),
+          delete: vi.fn().mockResolvedValue({}),
         },
-        task: { findMany: vi.fn().mockResolvedValue([]) },
-        project: { findMany: vi.fn().mockResolvedValue([]) },
-        page: { findMany: vi.fn().mockResolvedValue([]) },
+        task: {
+          findMany: vi.fn().mockResolvedValue([]),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        project: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn(), delete: vi.fn() },
+        page: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn(), delete: vi.fn() },
         event: { findMany: vi.fn().mockResolvedValue([]) },
         mindMap: {
           findMany: vi.fn().mockResolvedValue([
@@ -734,6 +740,7 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
         },
         routine: { findMany: vi.fn().mockResolvedValue([]) },
         habit: { findMany: vi.fn().mockResolvedValue([]) },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -752,6 +759,350 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
 
       expect(json.deletedCount).toBe(2); // taskList + unlocked mind map
       expect(json.lockedSkipped).toBe(1); // 1 locked mind map protected!
+    });
+  });
+
+  describe("Parent Validation Order, Transaction Atomicity & Cascade Protection", () => {
+    it("causes zero database changes when parent ID does not exist (nonexistent ID)", async () => {
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+          create: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn(),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        mindMap: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      // 1. task_list nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task_list", "00000000-0000-0000-0000-nonexistent1"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.task.findMany).not.toHaveBeenCalled();
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+
+      // 2. task nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task", "00000000-0000-0000-0000-nonexistent2"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.task.delete).not.toHaveBeenCalled();
+
+      // 3. project nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "project", "00000000-0000-0000-0000-nonexistent3"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.project.delete).not.toHaveBeenCalled();
+
+      // 4. note nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "note", "00000000-0000-0000-0000-nonexistent4"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.page.delete).not.toHaveBeenCalled();
+    });
+
+    it("causes zero database changes when parent item is ACTIVE (deletedAt: null)", async () => {
+      // If the parent is active, findFirst({ where: { id, userId, deletedAt: { not: null } } }) returns null
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task_list", "active_list_id"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: "active_list_id", userId: mockUser.id, deletedAt: { not: null } },
+      });
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "task", "active_task_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.task.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "project", "active_proj_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.project.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "note", "active_page_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.page.delete).not.toHaveBeenCalled();
+    });
+
+    it("causes zero database changes when parent belongs to another user (unauthorized)", async () => {
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null), // query scopes by attacker userId, returns null
+          delete: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const attackerUserId = "attacker_user_999";
+      const victimListId = "victim_list_123";
+
+      await expect(
+        permanentlyDeleteItem(attackerUserId, "task_list", victimListId),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: victimListId, userId: attackerUserId, deletedAt: { not: null } },
+      });
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+    });
+
+    it("preserves BOTH active and recently trashed child tasks before deleting task list", async () => {
+      const trashedListId = "list_trashed_100";
+      const activeFallbackListId = "list_fallback_200";
+
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockImplementation(async (args) => {
+            if (args.where.id === trashedListId) {
+              return { id: trashedListId, userId: mockUser.id, deletedAt: new Date() };
+            }
+            if (args.where.deletedAt === null) {
+              return { id: activeFallbackListId, userId: mockUser.id, deletedAt: null };
+            }
+            return null;
+          }),
+          delete: vi.fn().mockResolvedValue({ id: trashedListId }),
+        },
+        task: {
+          // Both active task and recently trashed task survive under this list
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: "task_child_active" },
+              { id: "task_child_recently_trashed" },
+            ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "task_list", trashedListId);
+      expect(result.success).toBe(true);
+
+      // 1. First step must be parent validation with deletedAt != null
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedListId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Child lookup is strictly scoped by userId
+      expect(mockTx.task.findMany).toHaveBeenCalledWith({
+        where: { listId: trashedListId, userId: mockUser.id },
+        select: { id: true },
+      });
+
+      // 3. All surviving child tasks (active and recently trashed) reparented to fallback list
+      expect(mockTx.task.updateMany).toHaveBeenCalledWith({
+        where: { listId: trashedListId, userId: mockUser.id },
+        data: { listId: activeFallbackListId },
+      });
+
+      // 4. Parent list permanently deleted
+      expect(mockTx.taskList.delete).toHaveBeenCalledWith({
+        where: { id: trashedListId },
+      });
+    });
+
+    it("preserves child subtasks when parent task is permanently deleted", async () => {
+      const trashedTaskId = "task_parent_100";
+
+      const mockTx = {
+        task: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedTaskId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+          delete: vi.fn().mockResolvedValue({ id: trashedTaskId }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "task", trashedTaskId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.task.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedTaskId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Child subtasks unparented with userId scoping
+      expect(mockTx.task.updateMany).toHaveBeenCalledWith({
+        where: { parentId: trashedTaskId, userId: mockUser.id },
+        data: { parentId: null },
+      });
+
+      // 3. Parent deleted
+      expect(mockTx.task.delete).toHaveBeenCalledWith({
+        where: { id: trashedTaskId },
+      });
+    });
+
+    it("preserves child pages when parent project is permanently deleted", async () => {
+      const trashedProjectId = "project_parent_100";
+
+      const mockTx = {
+        project: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedProjectId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          delete: vi.fn().mockResolvedValue({ id: trashedProjectId }),
+        },
+        page: {
+          updateMany: vi.fn().mockResolvedValue({ count: 3 }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "project", trashedProjectId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.project.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedProjectId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Project pages unlinked to standalone notes with userId scoping
+      expect(mockTx.page.updateMany).toHaveBeenCalledWith({
+        where: { projectId: trashedProjectId, userId: mockUser.id },
+        data: { projectId: null },
+      });
+
+      // 3. Parent project deleted
+      expect(mockTx.project.delete).toHaveBeenCalledWith({
+        where: { id: trashedProjectId },
+      });
+    });
+
+    it("preserves subpages when parent note is permanently deleted", async () => {
+      const trashedPageId = "page_parent_100";
+
+      const mockTx = {
+        page: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedPageId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+          delete: vi.fn().mockResolvedValue({ id: trashedPageId }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "note", trashedPageId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.page.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedPageId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Subpages unparented with userId scoping
+      expect(mockTx.page.updateMany).toHaveBeenCalledWith({
+        where: { parentId: trashedPageId, userId: mockUser.id },
+        data: { parentId: null },
+      });
+
+      // 3. Parent page deleted
+      expect(mockTx.page.delete).toHaveBeenCalledWith({
+        where: { id: trashedPageId },
+      });
     });
   });
 

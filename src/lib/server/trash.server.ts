@@ -493,115 +493,147 @@ export async function permanentlyDeleteItem(
 ): Promise<{ success: boolean; id: string }> {
   const prisma = db();
 
-  switch (type) {
-    case "task_list": {
-      // Reparent any active tasks to user's fallback list before deleting the task list
-      const activeTasks = await prisma.task.findMany({
-        where: { listId: id, deletedAt: null },
-        select: { id: true },
-      });
-      if (activeTasks.length > 0) {
-        let fallback = await prisma.taskList.findFirst({
-          where: { userId, deletedAt: null },
-          orderBy: { position: "asc" },
+  return prisma.$transaction(async (tx) => {
+    switch (type) {
+      case "task_list": {
+        // 1. Verify parent task list exists, belongs to user, and is trashed (deletedAt != null)
+        const list = await tx.taskList.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
         });
-        if (!fallback) {
-          fallback = await prisma.taskList.create({
-            data: { userId, title: "My Tasks", position: 1 },
+        if (!list) throw new ApiError(404, "Item not found in Recycle Bin");
+
+        // 2. Protect all surviving child tasks (both active and recently trashed)
+        // by reparenting them to an active fallback list so MySQL foreign-key cascade does not delete them
+        const survivingTasks = await tx.task.findMany({
+          where: { listId: id, userId },
+          select: { id: true },
+        });
+
+        if (survivingTasks.length > 0) {
+          let fallback = await tx.taskList.findFirst({
+            where: { userId, deletedAt: null },
+            orderBy: { position: "asc" },
+          });
+          if (!fallback) {
+            fallback = await tx.taskList.create({
+              data: { userId, title: "My Tasks", position: 1 },
+            });
+          }
+          await tx.task.updateMany({
+            where: { listId: id, userId },
+            data: { listId: fallback.id },
           });
         }
-        await prisma.task.updateMany({
-          where: { id: { in: activeTasks.map((t) => t.id) } },
-          data: { listId: fallback.id },
+
+        // 3. Permanently delete the task list
+        await tx.taskList.delete({ where: { id: list.id } });
+        return { success: true, id };
+      }
+
+      case "task": {
+        // 1. Verify parent task exists, belongs to user, and is trashed
+        const task = await tx.task.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
         });
+        if (!task) throw new ApiError(404, "Item not found in Recycle Bin");
+
+        // 2. Unparent all surviving subtasks (both active and recently trashed)
+        // so MySQL foreign key cascade does not delete them
+        await tx.task.updateMany({
+          where: { parentId: id, userId },
+          data: { parentId: null },
+        });
+
+        // 3. Permanently delete the task
+        await tx.task.delete({ where: { id: task.id } });
+        return { success: true, id };
       }
-      const res = await prisma.taskList.deleteMany({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
 
-    case "task": {
-      // Reparent any active subtasks so MySQL foreign key cascade does not delete them
-      await prisma.task.updateMany({
-        where: { parentId: id, deletedAt: null },
-        data: { parentId: null },
-      });
-      const res = await prisma.task.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
+      case "project": {
+        // 1. Verify project exists, belongs to user, and is trashed
+        const project = await tx.project.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!project) throw new ApiError(404, "Item not found in Recycle Bin");
 
-    case "project": {
-      // Reparent any active pages to standalone notes so MySQL foreign key cascade does not delete them
-      await prisma.page.updateMany({
-        where: { projectId: id, deletedAt: null },
-        data: { projectId: null },
-      });
-      const res = await prisma.project.deleteMany({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
+        // 2. Unlink all surviving project pages (both active and recently trashed)
+        // to standalone notes so MySQL foreign key cascade does not delete them
+        await tx.page.updateMany({
+          where: { projectId: id, userId },
+          data: { projectId: null },
+        });
 
-    case "note": {
-      // Reparent any active subpages so MySQL foreign key cascade does not delete them
-      await prisma.page.updateMany({
-        where: { parentId: id, deletedAt: null },
-        data: { parentId: null },
-      });
-      const res = await prisma.page.deleteMany({ where: { id, userId, deletedAt: { not: null } } });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
-
-    case "mind_map": {
-      const map = await prisma.mindMap.findFirst({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (!map) throw new ApiError(404, "Item not found in Recycle Bin");
-      if (map.isLocked) {
-        throw new ApiError(423, "423 Locked — Unlock this mind map before permanently deleting.");
+        // 3. Permanently delete the project
+        await tx.project.delete({ where: { id: project.id } });
+        return { success: true, id };
       }
-      await prisma.mindMap.delete({ where: { id: map.id } });
-      return { success: true, id };
-    }
 
-    case "event": {
-      const res = await prisma.event.deleteMany({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
+      case "note": {
+        // 1. Verify note exists, belongs to user, and is trashed
+        const page = await tx.page.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!page) throw new ApiError(404, "Item not found in Recycle Bin");
 
-    case "routine": {
-      const routine = await prisma.routine.findFirst({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (!routine) throw new ApiError(404, "Item not found in Recycle Bin");
-      await prisma.$transaction([
-        prisma.habit.deleteMany({
-          where: { routineId: routine.id, userId, deletedAt: { not: null } },
-        }),
-        prisma.routine.delete({ where: { id: routine.id } }),
-      ]);
-      return { success: true, id };
-    }
+        // 2. Unparent all surviving subpages (both active and recently trashed)
+        // so MySQL foreign key cascade does not delete them
+        await tx.page.updateMany({
+          where: { parentId: id, userId },
+          data: { parentId: null },
+        });
 
-    case "habit": {
-      const res = await prisma.habit.deleteMany({
-        where: { id, userId, deletedAt: { not: null } },
-      });
-      if (res.count === 0) throw new ApiError(404, "Item not found in Recycle Bin");
-      return { success: true, id };
-    }
+        // 3. Permanently delete the note
+        await tx.page.delete({ where: { id: page.id } });
+        return { success: true, id };
+      }
 
-    default:
-      throw new ApiError(400, "Unknown item type");
-  }
+      case "mind_map": {
+        const map = await tx.mindMap.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!map) throw new ApiError(404, "Item not found in Recycle Bin");
+        if (map.isLocked) {
+          throw new ApiError(423, "423 Locked — Unlock this mind map before permanently deleting.");
+        }
+        await tx.mindMap.delete({ where: { id: map.id } });
+        return { success: true, id };
+      }
+
+      case "event": {
+        const event = await tx.event.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!event) throw new ApiError(404, "Item not found in Recycle Bin");
+        await tx.event.delete({ where: { id: event.id } });
+        return { success: true, id };
+      }
+
+      case "routine": {
+        const routine = await tx.routine.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!routine) throw new ApiError(404, "Item not found in Recycle Bin");
+        await tx.habit.updateMany({
+          where: { routineId: routine.id, userId },
+          data: { routineId: null },
+        });
+        await tx.routine.delete({ where: { id: routine.id } });
+        return { success: true, id };
+      }
+
+      case "habit": {
+        const habit = await tx.habit.findFirst({
+          where: { id, userId, deletedAt: { not: null } },
+        });
+        if (!habit) throw new ApiError(404, "Item not found in Recycle Bin");
+        await tx.habit.delete({ where: { id: habit.id } });
+        return { success: true, id };
+      }
+
+      default:
+        throw new ApiError(400, "Unknown item type");
+    }
+  });
 }
 
 /**
