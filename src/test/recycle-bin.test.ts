@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiServer from "@/lib/server/api.server";
 import {
@@ -68,42 +69,96 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       const mockPrisma = {
         taskList: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "tl_1", userId: mockUser.id, title: "Work List", deletedAt, tasks: [{ id: "t_1" }] },
+            {
+              id: "tl_1",
+              userId: mockUser.id,
+              title: "Work List",
+              deletedAt,
+              tasks: [{ id: "t_1" }],
+            },
           ]),
         },
         task: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "t_1", userId: mockUser.id, title: "Fix Bug", deletedAt, list: { title: "Work List" }, parent: null, subtasks: [] },
+            {
+              id: "t_1",
+              userId: mockUser.id,
+              title: "Fix Bug",
+              deletedAt,
+              list: { title: "Work List" },
+              parent: null,
+              subtasks: [],
+            },
           ]),
         },
         project: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "proj_1", userId: mockUser.id, title: "Website Redesign", deletedAt, pages: [{ id: "pg_1" }] },
+            {
+              id: "proj_1",
+              userId: mockUser.id,
+              title: "Website Redesign",
+              deletedAt,
+              pages: [{ id: "pg_1" }],
+            },
           ]),
         },
         page: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "pg_1", userId: mockUser.id, title: "Home Wireframe", deletedAt, project: { title: "Website Redesign" }, parent: null },
+            {
+              id: "pg_1",
+              userId: mockUser.id,
+              title: "Home Wireframe",
+              deletedAt,
+              project: { title: "Website Redesign" },
+              parent: null,
+            },
           ]),
         },
         event: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "ev_1", userId: mockUser.id, title: "Client Demo", deletedAt, startAt: new Date("2026-10-20T09:00:00.000Z"), allDay: false },
+            {
+              id: "ev_1",
+              userId: mockUser.id,
+              title: "Client Demo",
+              deletedAt,
+              startAt: new Date("2026-10-20T09:00:00.000Z"),
+              allDay: false,
+            },
           ]),
         },
         mindMap: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "map_1", userId: mockUser.id, title: "System Architecture", deletedAt, isLocked: false, nodeCount: 12 },
+            {
+              id: "map_1",
+              userId: mockUser.id,
+              title: "System Architecture",
+              deletedAt,
+              isLocked: false,
+              nodeCount: 12,
+            },
           ]),
         },
         routine: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "r_1", userId: mockUser.id, title: "Morning Routine", deletedAt, habits: [{ id: "h_1" }] },
+            {
+              id: "r_1",
+              userId: mockUser.id,
+              title: "Morning Routine",
+              deletedAt,
+              habits: [{ id: "h_1" }],
+            },
           ]),
         },
         habit: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "h_1", userId: mockUser.id, title: "Drink Water", deletedAt, routine: { title: "Morning Routine" }, routineId: "r_1" },
+            {
+              id: "h_1",
+              userId: mockUser.id,
+              title: "Drink Water",
+              deletedAt,
+              routine: { title: "Morning Routine" },
+              routineId: "r_1",
+            },
           ]),
         },
       };
@@ -143,13 +198,27 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
         project: { findMany: vi.fn().mockResolvedValue([]) },
         page: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "pg_note", userId: mockUser.id, title: "Meeting Notes", deletedAt, project: null, parent: null },
+            {
+              id: "pg_note",
+              userId: mockUser.id,
+              title: "Meeting Notes",
+              deletedAt,
+              project: null,
+              parent: null,
+            },
           ]),
         },
         event: { findMany: vi.fn().mockResolvedValue([]) },
         mindMap: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "map_1", userId: mockUser.id, title: "Brainstorm", deletedAt, isLocked: false, nodeCount: 3 },
+            {
+              id: "map_1",
+              userId: mockUser.id,
+              title: "Brainstorm",
+              deletedAt,
+              isLocked: false,
+              nodeCount: 3,
+            },
           ]),
         },
         routine: { findMany: vi.fn().mockResolvedValue([]) },
@@ -177,8 +246,24 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
         taskList: { findMany: vi.fn().mockResolvedValue([]) },
         task: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "t_1", userId: mockUser.id, title: "Important Client Follow-up", deletedAt, list: { title: "Work" }, parent: null, subtasks: [] },
-            { id: "t_2", userId: mockUser.id, title: "Buy groceries", deletedAt, list: { title: "Personal" }, parent: null, subtasks: [] },
+            {
+              id: "t_1",
+              userId: mockUser.id,
+              title: "Important Client Follow-up",
+              deletedAt,
+              list: { title: "Work" },
+              parent: null,
+              subtasks: [],
+            },
+            {
+              id: "t_2",
+              userId: mockUser.id,
+              title: "Buy groceries",
+              deletedAt,
+              list: { title: "Personal" },
+              parent: null,
+              subtasks: [],
+            },
           ]),
         },
         project: { findMany: vi.fn().mockResolvedValue([]) },
@@ -204,7 +289,12 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
 
   describe("Restoration Functionality (POST /api/trash/restore)", () => {
     it("restores a task list and recovers all its deleted tasks and subtasks", async () => {
-      const mockList = { id: "00000000-0000-0000-0000-000000000001", userId: mockUser.id, title: "Sprint 42", deletedAt: new Date() };
+      const mockList = {
+        id: "00000000-0000-0000-0000-000000000001",
+        userId: mockUser.id,
+        title: "Sprint 42",
+        deletedAt: new Date(),
+      };
 
       const txTaskList = { update: vi.fn().mockResolvedValue(mockList) };
       const txTask = { updateMany: vi.fn().mockResolvedValue({ count: 5 }) };
@@ -319,7 +409,8 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       };
 
       const txTaskList = {
-        findFirst: vi.fn()
+        findFirst: vi
+          .fn()
           .mockResolvedValueOnce(null) // parent list does not exist
           .mockResolvedValueOnce(activeFallbackList), // active fallback list found
       };
@@ -357,7 +448,12 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
     });
 
     it("restores a project and recovers all its deleted pages", async () => {
-      const mockProj = { id: "00000000-0000-0000-0000-000000000003", userId: mockUser.id, title: "Mobile App", deletedAt: new Date() };
+      const mockProj = {
+        id: "00000000-0000-0000-0000-000000000003",
+        userId: mockUser.id,
+        title: "Mobile App",
+        deletedAt: new Date(),
+      };
 
       const txProject = { update: vi.fn().mockResolvedValue(mockProj) };
       const txPage = { updateMany: vi.fn().mockResolvedValue({ count: 4 }) };
@@ -395,7 +491,12 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
     });
 
     it("restores a routine and recovers its deleted habits", async () => {
-      const mockRoutine = { id: "00000000-0000-0000-0000-000000000004", userId: mockUser.id, title: "Night Routine", deletedAt: new Date() };
+      const mockRoutine = {
+        id: "00000000-0000-0000-0000-000000000004",
+        userId: mockUser.id,
+        title: "Night Routine",
+        deletedAt: new Date(),
+      };
 
       const txRoutine = { update: vi.fn().mockResolvedValue(mockRoutine) };
       const txHabit = { updateMany: vi.fn().mockResolvedValue({ count: 2 }) };
@@ -437,7 +538,10 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
         id: "00000000-0000-0000-0000-000000000005",
         userId: mockUser.id,
         title: "Locked Architecture",
-        data: JSON.stringify({ nodes: [{ id: "1" }], links: [{ id: "l1", source: "1", target: "2" }] }),
+        data: JSON.stringify({
+          nodes: [{ id: "1" }],
+          links: [{ id: "l1", source: "1", target: "2" }],
+        }),
         isLocked: true,
         deletedAt: new Date(),
       };
@@ -474,8 +578,20 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       const deletedAt = new Date();
       const mockPrisma = {
         taskList: {
-          findMany: vi.fn().mockResolvedValue([{ id: "00000000-0000-0000-0000-000000000001", userId: mockUser.id, title: "List", deletedAt, tasks: [] }]),
-          findFirst: vi.fn().mockResolvedValue({ id: "00000000-0000-0000-0000-000000000001", userId: mockUser.id, deletedAt }),
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "00000000-0000-0000-0000-000000000001",
+              userId: mockUser.id,
+              title: "List",
+              deletedAt,
+              tasks: [],
+            },
+          ]),
+          findFirst: vi.fn().mockResolvedValue({
+            id: "00000000-0000-0000-0000-000000000001",
+            userId: mockUser.id,
+            deletedAt,
+          }),
         },
         task: { findMany: vi.fn().mockResolvedValue([]) },
         project: { findMany: vi.fn().mockResolvedValue([]) },
@@ -524,6 +640,7 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
           findFirst: vi.fn().mockResolvedValue(lockedMap),
           delete: vi.fn(),
         },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -557,6 +674,7 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
           findFirst: vi.fn().mockResolvedValue(unlockedMap),
           delete: vi.fn().mockResolvedValue(unlockedMap),
         },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -578,23 +696,51 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       const deletedAt = new Date();
       const mockPrisma = {
         taskList: {
-          findMany: vi.fn().mockResolvedValue([{ id: "tl_1", userId: mockUser.id, title: "List", deletedAt, tasks: [] }]),
-          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: "tl_1", userId: mockUser.id, title: "List", deletedAt, tasks: [] },
+            ]),
+          findFirst: vi.fn().mockResolvedValue({ id: "tl_1", userId: mockUser.id, deletedAt }),
+          delete: vi.fn().mockResolvedValue({}),
         },
-        task: { findMany: vi.fn().mockResolvedValue([]) },
-        project: { findMany: vi.fn().mockResolvedValue([]) },
-        page: { findMany: vi.fn().mockResolvedValue([]) },
+        task: {
+          findMany: vi.fn().mockResolvedValue([]),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        project: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn(), delete: vi.fn() },
+        page: { findMany: vi.fn().mockResolvedValue([]), findFirst: vi.fn(), delete: vi.fn() },
         event: { findMany: vi.fn().mockResolvedValue([]) },
         mindMap: {
           findMany: vi.fn().mockResolvedValue([
-            { id: "map_unlocked", userId: mockUser.id, title: "Unlocked", deletedAt, isLocked: false, nodeCount: 1 },
-            { id: "map_locked", userId: mockUser.id, title: "Locked", deletedAt, isLocked: true, nodeCount: 1 },
+            {
+              id: "map_unlocked",
+              userId: mockUser.id,
+              title: "Unlocked",
+              deletedAt,
+              isLocked: false,
+              nodeCount: 1,
+            },
+            {
+              id: "map_locked",
+              userId: mockUser.id,
+              title: "Locked",
+              deletedAt,
+              isLocked: true,
+              nodeCount: 1,
+            },
           ]),
-          findFirst: vi.fn().mockResolvedValue({ id: "map_unlocked", userId: mockUser.id, isLocked: false, deletedAt }),
+          findFirst: vi.fn().mockResolvedValue({
+            id: "map_unlocked",
+            userId: mockUser.id,
+            isLocked: false,
+            deletedAt,
+          }),
           delete: vi.fn().mockResolvedValue({}),
         },
         routine: { findMany: vi.fn().mockResolvedValue([]) },
         habit: { findMany: vi.fn().mockResolvedValue([]) },
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(mockPrisma)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -616,33 +762,391 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
     });
   });
 
+  describe("Parent Validation Order, Transaction Atomicity & Cascade Protection", () => {
+    it("causes zero database changes when parent ID does not exist (nonexistent ID)", async () => {
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+          create: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          findMany: vi.fn(),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        mindMap: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      // 1. task_list nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task_list", "00000000-0000-0000-0000-nonexistent1"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.task.findMany).not.toHaveBeenCalled();
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+
+      // 2. task nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task", "00000000-0000-0000-0000-nonexistent2"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.task.delete).not.toHaveBeenCalled();
+
+      // 3. project nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "project", "00000000-0000-0000-0000-nonexistent3"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.project.delete).not.toHaveBeenCalled();
+
+      // 4. note nonexistent
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "note", "00000000-0000-0000-0000-nonexistent4"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.page.delete).not.toHaveBeenCalled();
+    });
+
+    it("causes zero database changes when parent item is ACTIVE (deletedAt: null)", async () => {
+      // If the parent is active, findFirst({ where: { id, userId, deletedAt: { not: null } } }) returns null
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "task_list", "active_list_id"),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: "active_list_id", userId: mockUser.id, deletedAt: { not: null } },
+      });
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "task", "active_task_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.task.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "project", "active_proj_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.project.delete).not.toHaveBeenCalled();
+
+      await expect(permanentlyDeleteItem(mockUser.id, "note", "active_page_id")).rejects.toThrow(
+        "Item not found in Recycle Bin",
+      );
+      expect(mockTx.page.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.page.delete).not.toHaveBeenCalled();
+    });
+
+    it("causes zero database changes when parent belongs to another user (unauthorized)", async () => {
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockResolvedValue(null), // query scopes by attacker userId, returns null
+          delete: vi.fn(),
+        },
+        task: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+        project: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          delete: vi.fn(),
+        },
+        page: {
+          findFirst: vi.fn().mockResolvedValue(null),
+          updateMany: vi.fn(),
+          delete: vi.fn(),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const attackerUserId = "attacker_user_999";
+      const victimListId = "victim_list_123";
+
+      await expect(
+        permanentlyDeleteItem(attackerUserId, "task_list", victimListId),
+      ).rejects.toThrow("Item not found in Recycle Bin");
+
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: victimListId, userId: attackerUserId, deletedAt: { not: null } },
+      });
+      expect(mockTx.task.updateMany).not.toHaveBeenCalled();
+      expect(mockTx.taskList.delete).not.toHaveBeenCalled();
+    });
+
+    it("preserves BOTH active and recently trashed child tasks before deleting task list", async () => {
+      const trashedListId = "list_trashed_100";
+      const activeFallbackListId = "list_fallback_200";
+
+      const mockTx = {
+        taskList: {
+          findFirst: vi.fn().mockImplementation(async (args) => {
+            if (args.where.id === trashedListId) {
+              return { id: trashedListId, userId: mockUser.id, deletedAt: new Date() };
+            }
+            if (args.where.deletedAt === null) {
+              return { id: activeFallbackListId, userId: mockUser.id, deletedAt: null };
+            }
+            return null;
+          }),
+          delete: vi.fn().mockResolvedValue({ id: trashedListId }),
+        },
+        task: {
+          // Both active task and recently trashed task survive under this list
+          findMany: vi
+            .fn()
+            .mockResolvedValue([
+              { id: "task_child_active" },
+              { id: "task_child_recently_trashed" },
+            ]),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "task_list", trashedListId);
+      expect(result.success).toBe(true);
+
+      // 1. First step must be parent validation with deletedAt != null
+      expect(mockTx.taskList.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedListId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Child lookup is strictly scoped by userId
+      expect(mockTx.task.findMany).toHaveBeenCalledWith({
+        where: { listId: trashedListId, userId: mockUser.id },
+        select: { id: true },
+      });
+
+      // 3. All surviving child tasks (active and recently trashed) reparented to fallback list
+      expect(mockTx.task.updateMany).toHaveBeenCalledWith({
+        where: { listId: trashedListId, userId: mockUser.id },
+        data: { listId: activeFallbackListId },
+      });
+
+      // 4. Parent list permanently deleted
+      expect(mockTx.taskList.delete).toHaveBeenCalledWith({
+        where: { id: trashedListId },
+      });
+    });
+
+    it("preserves child subtasks when parent task is permanently deleted", async () => {
+      const trashedTaskId = "task_parent_100";
+
+      const mockTx = {
+        task: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedTaskId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+          delete: vi.fn().mockResolvedValue({ id: trashedTaskId }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "task", trashedTaskId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.task.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedTaskId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Child subtasks unparented with userId scoping
+      expect(mockTx.task.updateMany).toHaveBeenCalledWith({
+        where: { parentId: trashedTaskId, userId: mockUser.id },
+        data: { parentId: null },
+      });
+
+      // 3. Parent deleted
+      expect(mockTx.task.delete).toHaveBeenCalledWith({
+        where: { id: trashedTaskId },
+      });
+    });
+
+    it("preserves child pages when parent project is permanently deleted", async () => {
+      const trashedProjectId = "project_parent_100";
+
+      const mockTx = {
+        project: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedProjectId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          delete: vi.fn().mockResolvedValue({ id: trashedProjectId }),
+        },
+        page: {
+          updateMany: vi.fn().mockResolvedValue({ count: 3 }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "project", trashedProjectId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.project.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedProjectId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Project pages unlinked to standalone notes with userId scoping
+      expect(mockTx.page.updateMany).toHaveBeenCalledWith({
+        where: { projectId: trashedProjectId, userId: mockUser.id },
+        data: { projectId: null },
+      });
+
+      // 3. Parent project deleted
+      expect(mockTx.project.delete).toHaveBeenCalledWith({
+        where: { id: trashedProjectId },
+      });
+    });
+
+    it("preserves subpages when parent note is permanently deleted", async () => {
+      const trashedPageId = "page_parent_100";
+
+      const mockTx = {
+        page: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: trashedPageId,
+            userId: mockUser.id,
+            deletedAt: new Date(),
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+          delete: vi.fn().mockResolvedValue({ id: trashedPageId }),
+        },
+      };
+
+      const mockPrisma = {
+        $transaction: vi.fn().mockImplementation(async (cb) => cb(mockTx)),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await permanentlyDeleteItem(mockUser.id, "note", trashedPageId);
+      expect(result.success).toBe(true);
+
+      // 1. Parent validated first
+      expect(mockTx.page.findFirst).toHaveBeenCalledWith({
+        where: { id: trashedPageId, userId: mockUser.id, deletedAt: { not: null } },
+      });
+
+      // 2. Subpages unparented with userId scoping
+      expect(mockTx.page.updateMany).toHaveBeenCalledWith({
+        where: { parentId: trashedPageId, userId: mockUser.id },
+        data: { parentId: null },
+      });
+
+      // 3. Parent page deleted
+      expect(mockTx.page.delete).toHaveBeenCalledWith({
+        where: { id: trashedPageId },
+      });
+    });
+  });
+
   describe("Automatic 30-Day Permanent Deletion Cleanup (Hostinger Scheduled Cron)", () => {
+    const createMockTx = (overrides: any = {}) => ({
+      habit: { deleteMany: vi.fn().mockResolvedValue({ count: 3 }), ...overrides.habit },
+      routine: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }), ...overrides.routine },
+      task: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 10 }),
+        ...overrides.task,
+      },
+      taskList: {
+        findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockResolvedValue({ id: "list_active_1", userId: mockUser.id }),
+        create: vi.fn().mockResolvedValue({ id: "list_new_1", userId: mockUser.id }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
+        ...overrides.taskList,
+      },
+      page: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 5 }),
+        ...overrides.page,
+      },
+      project: {
+        findMany: vi.fn().mockResolvedValue([]),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        ...overrides.project,
+      },
+      event: { deleteMany: vi.fn().mockResolvedValue({ count: 4 }), ...overrides.event },
+      mindMap: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }), ...overrides.mindMap },
+    });
+
     it("permanently removes expired items older than 30 days and never touches active items", async () => {
       const simulatedNow = new Date("2026-10-18T12:00:00.000Z");
       const simulatedCutoff = getExpirationCutoff(30, simulatedNow);
 
-      const txHabit = { deleteMany: vi.fn().mockResolvedValue({ count: 3 }) };
-      const txRoutine = { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) };
-      const txTask = { deleteMany: vi.fn().mockResolvedValue({ count: 10 }) };
-      const txTaskList = { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) };
-      const txPage = { deleteMany: vi.fn().mockResolvedValue({ count: 5 }) };
-      const txProject = { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) };
-      const txEvent = { deleteMany: vi.fn().mockResolvedValue({ count: 4 }) };
-      const txMindMap = { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) };
-
+      const tx = createMockTx();
       const mockPrisma = {
-        $transaction: vi.fn().mockImplementation(async (callback) => {
-          return callback({
-            habit: txHabit,
-            routine: txRoutine,
-            task: txTask,
-            taskList: txTaskList,
-            page: txPage,
-            project: txProject,
-            event: txEvent,
-            mindMap: txMindMap,
-          });
-        }),
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -658,69 +1162,205 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       expect(summary.deleted.habits).toBe(3);
       expect(summary.deleted.routines).toBe(1);
 
-      // Verify the query strictly targets deletedAt <= cutoff (active items with deletedAt: null are never selected)
-      expect(txTask.deleteMany).toHaveBeenCalledWith({
+      // Verify queries strictly target deletedAt <= cutoff (active items with deletedAt: null are never selected)
+      expect(tx.task.deleteMany).toHaveBeenCalledWith({
         where: { deletedAt: { lte: simulatedCutoff } },
       });
-      // Verify locked mind maps are protected even during auto-cleanup
-      expect(txMindMap.deleteMany).toHaveBeenCalledWith({
+      expect(tx.mindMap.deleteMany).toHaveBeenCalledWith({
         where: { deletedAt: { lte: simulatedCutoff }, isLocked: false },
       });
     });
 
-    it("cleanup endpoint /api/trash/cleanup authorizes with CRON_SECRET", async () => {
-      process.env["CRON_SECRET"] = "super-secret-cron-token-12345";
+    it("prevents premature deletion: items trashed less than 30 days ago are preserved", async () => {
+      const now = new Date("2026-10-18T12:00:00.000Z");
+      const cutoff30d = getExpirationCutoff(30, now);
+
+      // 10 days ago is within the 30-day retention window
+      const itemDeleted10DaysAgo = new Date("2026-10-08T12:00:00.000Z");
+      expect(itemDeleted10DaysAgo.getTime()).toBeGreaterThan(cutoff30d.getTime());
+
+      // 29 days ago is within retention
+      const itemDeleted29DaysAgo = new Date("2026-09-19T12:00:00.000Z");
+      expect(itemDeleted29DaysAgo.getTime()).toBeGreaterThan(cutoff30d.getTime());
+
+      // Exactly 30 days or older is expired
+      const itemDeleted30DaysAgo = new Date("2026-09-18T12:00:00.000Z");
+      expect(itemDeleted30DaysAgo.getTime()).toBeLessThanOrEqual(cutoff30d.getTime());
+    });
+
+    it("preserves active and restored child records when an expired parent is deleted", async () => {
+      const simulatedNow = new Date("2026-10-18T12:00:00.000Z");
+      const simulatedCutoff = getExpirationCutoff(30, simulatedNow);
+
+      const expiredPageId = "page_parent_expired_1";
+      const expiredProjectId = "proj_expired_1";
+      const expiredTaskId = "task_parent_expired_1";
+      const expiredListId = "list_expired_1";
+
+      const tx = createMockTx({
+        page: {
+          findMany: vi.fn().mockImplementation(async (args) => {
+            if (args.where?.deletedAt?.lte) {
+              return [{ id: expiredPageId }];
+            }
+            return [];
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        project: {
+          findMany: vi.fn().mockResolvedValue([{ id: expiredProjectId }]),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        task: {
+          findMany: vi.fn().mockImplementation(async (args) => {
+            if (args.where?.parentId) {
+              return [{ id: expiredTaskId }];
+            }
+            if (args.where?.listId) {
+              // Active task inside expired list
+              return [{ id: "task_active_in_expired_list", userId: mockUser.id }];
+            }
+            return [{ id: expiredTaskId }];
+          }),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        taskList: {
+          findMany: vi.fn().mockResolvedValue([{ id: expiredListId, userId: mockUser.id }]),
+          findFirst: vi.fn().mockResolvedValue({ id: "list_active_fallback", userId: mockUser.id }),
+          create: vi.fn().mockResolvedValue({ id: "list_new", userId: mockUser.id }),
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      });
 
       const mockPrisma = {
-        $transaction: vi.fn().mockImplementation(async (callback) => {
-          return callback({
-            habit: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            routine: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            task: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            taskList: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            page: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            project: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            event: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            mindMap: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-          });
-        }),
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
 
-      const handlers = (CleanupRoute.options as any).server.handlers;
+      await cleanupExpiredTrash({ simulatedCutoff });
 
-      // 1. Without secret -> 401
-      const unauthReq = new Request("http://localhost/api/trash/cleanup", { method: "POST" });
-      const unauthRes = await handlers.POST({ request: unauthReq });
-      expect(unauthRes.status).toBe(401);
-
-      // 2. With Bearer token -> 200 OK
-      const authReq = new Request("http://localhost/api/trash/cleanup", {
-        method: "POST",
-        headers: { Authorization: "Bearer super-secret-cron-token-12345" },
+      // 1. Verify subpages: active child pages of expired parent page were unparented
+      expect(tx.page.updateMany).toHaveBeenCalledWith({
+        where: {
+          parentId: { in: [expiredPageId] },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: simulatedCutoff } }],
+        },
+        data: { parentId: null },
       });
-      const authRes = await handlers.POST({ request: authReq });
-      expect(authRes.status).toBe(200);
-      const json = await authRes.json();
-      expect(json.ok).toBe(true);
-      expect(json.deleted.tasks).toBe(0);
+
+      // 2. Verify project notes: active notes in expired project were converted to standalone notes
+      expect(tx.page.updateMany).toHaveBeenCalledWith({
+        where: {
+          projectId: { in: [expiredProjectId] },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: simulatedCutoff } }],
+        },
+        data: { projectId: null },
+      });
+
+      // 3. Verify subtasks: active subtasks of expired parent task were unparented
+      expect(tx.task.updateMany).toHaveBeenCalledWith({
+        where: {
+          parentId: { in: [expiredTaskId] },
+          OR: [{ deletedAt: null }, { deletedAt: { gt: simulatedCutoff } }],
+        },
+        data: { parentId: null },
+      });
+
+      // 4. Verify list tasks: active tasks inside expired list were reparented to an active list
+      expect(tx.task.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ["task_active_in_expired_list"] } },
+        data: { listId: "list_active_fallback" },
+      });
+    });
+
+    describe("/api/trash/cleanup Endpoint Security", () => {
+      beforeEach(() => {
+        process.env["CRON_SECRET"] = "super-secret-cron-token-12345";
+      });
+
+      it("rejects unauthorized requests with 401 when CRON_SECRET is missing", async () => {
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        const unauthReq = new Request("http://localhost/api/trash/cleanup", { method: "POST" });
+        const res = await handlers.POST({ request: unauthReq });
+        expect(res.status).toBe(401);
+      });
+
+      it("rejects requests with incorrect CRON_SECRET with 401", async () => {
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        const badReq = new Request("http://localhost/api/trash/cleanup", {
+          method: "POST",
+          headers: { Authorization: "Bearer wrong-secret" },
+        });
+        const res = await handlers.POST({ request: badReq });
+        expect(res.status).toBe(401);
+      });
+
+      it("rejects authenticated user sessions without CRON_SECRET (session auth strictly removed)", async () => {
+        vi.spyOn(apiServer, "getUser").mockResolvedValue(mockUser as any);
+
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        const sessionOnlyReq = new Request("http://localhost/api/trash/cleanup", {
+          method: "POST",
+          headers: { Cookie: "session=valid_user_session_token" },
+        });
+
+        const res = await handlers.POST({ request: sessionOnlyReq });
+        expect(res.status).toBe(401);
+      });
+
+      it("accepts valid Bearer token authorization and executes cleanup", async () => {
+        const tx = createMockTx();
+        const mockPrisma = {
+          $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
+        };
+        (globalThis as any).__prisma = mockPrisma;
+
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        const authReq = new Request("http://localhost/api/trash/cleanup", {
+          method: "POST",
+          headers: { Authorization: "Bearer super-secret-cron-token-12345" },
+        });
+
+        const res = await handlers.POST({ request: authReq });
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.ok).toBe(true);
+      });
+
+      it("accepts valid x-cron-secret header authorization", async () => {
+        const tx = createMockTx();
+        const mockPrisma = {
+          $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
+        };
+        (globalThis as any).__prisma = mockPrisma;
+
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        const headerReq = new Request("http://localhost/api/trash/cleanup", {
+          method: "POST",
+          headers: { "x-cron-secret": "super-secret-cron-token-12345" },
+        });
+
+        const res = await handlers.POST({ request: headerReq });
+        expect(res.status).toBe(200);
+        const json = await res.json();
+        expect(json.ok).toBe(true);
+      });
+
+      it("only defines POST handler (GET method is not allowed)", () => {
+        const handlers = (CleanupRoute.options as any).server.handlers;
+        expect(handlers.POST).toBeDefined();
+        expect(handlers.GET).toBeUndefined();
+      });
     });
 
     it("cleanup is completely idempotent and safe to retry", async () => {
+      const tx = createMockTx();
       const mockPrisma = {
-        $transaction: vi.fn().mockImplementation(async (callback) => {
-          return callback({
-            habit: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            routine: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            task: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            taskList: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            page: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            project: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            event: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-            mindMap: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
-          });
-        }),
+        $transaction: vi.fn().mockImplementation(async (callback) => callback(tx)),
       };
 
       (globalThis as any).__prisma = mockPrisma;
@@ -730,8 +1370,8 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
       // Call 2 immediately after
       const res2 = await cleanupExpiredTrash();
 
-      expect(res1.deleted.tasks).toBe(0);
-      expect(res2.deleted.tasks).toBe(0);
+      expect(res1.deleted.tasks).toBe(10);
+      expect(res2.deleted.tasks).toBe(10);
     });
   });
 });
