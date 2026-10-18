@@ -14,4 +14,14 @@ describe("App routing", () => {
 
     expect(matches.at(-1)?.routeId).not.toBe(rootRouteId);
   });
+
+  it("matches mind-maps list and editor routes", () => {
+    const router = createRouter({ routeTree, context: { queryClient: new QueryClient() } });
+
+    const listMatches = router.matchRoutes("/mind-maps");
+    expect(listMatches.at(-1)?.routeId).not.toBe(rootRouteId);
+
+    const editorMatches = router.matchRoutes("/mind-maps/test-map-id");
+    expect(editorMatches.at(-1)?.routeId).not.toBe(rootRouteId);
+  });
 });

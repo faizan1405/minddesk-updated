@@ -66,6 +66,10 @@ function Editor({ map }: { map: MindMapFull }) {
     if (right > limit) rf.setViewport({ x: x - (right - limit), y, zoom }, { duration: 200 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inspector !== null, selectedId]);
+  useEffect(() => {
+    const t = setTimeout(() => { rf.fitView({ padding: 0.25, duration: 250 }); }, 120);
+    return () => clearTimeout(t);
+  }, [rf]);
   const [helpOpen, setHelpOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState(0);
