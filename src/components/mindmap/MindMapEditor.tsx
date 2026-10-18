@@ -29,6 +29,7 @@ import {
 import { FloatingEdge, MapCtx, TopicNode, colorVar, type TopicRFNode } from "./parts";
 import { NodePanel, type NodeActions, type PanelTab } from "./NodePanel";
 import { ContextToolbar } from "./ContextToolbar";
+import { ExportMindMapDialog } from "./ExportMindMapDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,7 @@ function Editor({ map }: { map: MindMapFull }) {
     return () => clearTimeout(t);
   }, [rf]);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hit, setHit] = useState(0);
   const [, bump] = useState(0);
@@ -593,9 +595,13 @@ function Editor({ map }: { map: MindMapFull }) {
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Export" title="Export"><Download className="h-4 w-4" /></Button></DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent align="end" className="w-52">
               <DropdownMenuItem onSelect={exportJson}>Full backup (.json, re-importable)</DropdownMenuItem>
               <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setPdfDialogOpen(true)}>
+                <FileText className="mr-2 h-4 w-4 text-primary" />
+                <span>PDF (.pdf)</span>
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportImage("png")}>Image (.png)</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void exportImage("svg")}>Image (.svg)</DropdownMenuItem>
             </DropdownMenuContent>
@@ -746,6 +752,22 @@ function Editor({ map }: { map: MindMapFull }) {
           </dl>
         </DialogContent>
       </Dialog>
+
+      <ExportMindMapDialog
+        open={pdfDialogOpen}
+        onOpenChange={setPdfDialogOpen}
+        viewportElement={wrapRef.current?.querySelector<HTMLElement>(".react-flow__viewport") ?? null}
+        nodes={rf.getNodes()}
+        title={title}
+        canvasBgColor={wrapRef.current ? getComputedStyle(wrapRef.current).backgroundColor : undefined}
+        onBeforeExport={() => {
+          if (editingId) {
+            const el = document.querySelector<HTMLTextAreaElement>(".mm-node textarea");
+            commitTitle(editingId, el?.value ?? "");
+          }
+          setSelectedId(null);
+        }}
+      />
     </div>
   );
 }

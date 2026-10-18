@@ -1,8 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, FileText, MoreHorizontal, Plus } from "lucide-react";
+import { ChevronRight, FileDown, FileText, MoreHorizontal, Plus } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { ancestors, descendantCount, pageTitle, usePageActions, type PageMeta } from "@/lib/pages";
+import { ancestors, descendantCount, pageTitle, usePageActions, type PageFull, type PageMeta } from "@/lib/pages";
+import { api } from "@/lib/api-client";
+import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -89,6 +92,26 @@ function TreeRow({
   const { renamePage, deletePage } = usePageActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportPdf = async () => {
+    if (exporting) return;
+    setExporting(true);
+    const toastId = toast.loading("Exporting note to PDF...");
+    try {
+      const fullPage = await api<PageFull>(`/api/pages/${page.id}`);
+      await exportNoteToPdf({
+        title: fullPage.title,
+        blocks: fullPage.content.blocks,
+      });
+      toast.success("Note PDF downloaded successfully", { id: toastId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to export PDF";
+      toast.error(`Export failed: ${msg}`, { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div role="treeitem" aria-expanded={hasKids ? isOpen : undefined} aria-selected={active}>
@@ -123,9 +146,14 @@ function TreeRow({
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-44">
+          <DropdownMenuContent align="start" className="w-48">
             <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
             <DropdownMenuItem onSelect={onAddChild}>Add subpage</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={exporting} onSelect={handleExportPdf}>
+              <FileDown className="mr-2 h-4 w-4 text-primary" />
+              <span>Export as PDF</span>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
               Delete

@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import { Check, List, ListChecks, ListOrdered, Pilcrow } from "lucide-react";
+import { Check, FileDown, List, ListChecks, ListOrdered, Loader2, Pilcrow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { newBlockId, type Block, type BlockType } from "@/lib/page-content";
 
@@ -13,8 +13,14 @@ const TOOLBAR: { type: BlockType; label: string; icon: typeof List }[] = [
 type Focus = { id: string; pos: number } | null;
 
 export function BlockEditor({
-  blocks, onChange, focusFirstSignal,
-}: { blocks: Block[]; onChange: (b: Block[]) => void; focusFirstSignal?: number }) {
+  blocks, onChange, focusFirstSignal, onExportPdf, isExporting,
+}: {
+  blocks: Block[];
+  onChange: (b: Block[]) => void;
+  focusFirstSignal?: number;
+  onExportPdf?: () => void;
+  isExporting?: boolean;
+}) {
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
   const [pendingFocus, setPendingFocus] = useState<Focus>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -141,6 +147,26 @@ export function BlockEditor({
             <t.icon className="h-4 w-4" />
           </button>
         ))}
+        {onExportPdf && (
+          <>
+            <div className="mx-0.5 my-1.5 w-px self-stretch bg-border/60" aria-hidden />
+            <button
+              type="button"
+              title="Export as PDF"
+              aria-label="Export as PDF"
+              disabled={isExporting}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onExportPdf}
+              className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:scale-95 disabled:opacity-50 md:h-9 md:w-9"
+            >
+              {isExporting ? (
+                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              ) : (
+                <FileDown className="h-4 w-4 text-primary" />
+              )}
+            </button>
+          </>
+        )}
       </div>
 
       <div className="space-y-0.5">

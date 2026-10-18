@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ChevronRight, FileText, Layers, MoreHorizontal, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileDown, FileText, Layers, MoreHorizontal, Plus, Search, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -8,7 +9,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { TextPromptDialog } from "@/components/app/TextPromptDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
-import { ancestors, descendantCount, pageTitle, usePageActions, type PageMeta } from "@/lib/pages";
+import { ancestors, descendantCount, pageTitle, usePageActions, type PageFull, type PageMeta } from "@/lib/pages";
+import { api } from "@/lib/api-client";
+import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import { cn } from "@/lib/utils";
 
 const fmtDate = (iso: string) => {
@@ -120,6 +123,26 @@ export function NoteMobileBar({
   const goBack = () =>
     parent ? navigate({ to: "/notes/$pageId", params: { pageId: parent.id } }) : navigate({ to: "/notes" });
 
+  const [exporting, setExporting] = useState(false);
+  const handleExportPdf = async () => {
+    if (exporting) return;
+    setExporting(true);
+    const toastId = toast.loading("Exporting note to PDF...");
+    try {
+      const fullPage = await api<PageFull>(`/api/pages/${current.id}`);
+      await exportNoteToPdf({
+        title: fullPage.title,
+        blocks: fullPage.content.blocks,
+      });
+      toast.success("Note PDF downloaded successfully", { id: toastId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to export PDF";
+      toast.error(`Export failed: ${msg}`, { id: toastId });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="sticky top-14 z-10 flex h-12 items-center gap-1 border-b bg-background/95 px-2 backdrop-blur">
       <Button variant="ghost" className="h-10 shrink-0 gap-1 px-2" onClick={goBack}
@@ -136,9 +159,14 @@ export function NoteMobileBar({
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
           <DropdownMenuItem disabled={pending} onSelect={onAddSub}>Add subpage</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem disabled={exporting} onSelect={handleExportPdf}>
+            <FileDown className="mr-2 h-4 w-4 text-primary" />
+            <span>Export as PDF</span>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>Delete</DropdownMenuItem>
         </DropdownMenuContent>

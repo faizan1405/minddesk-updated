@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, Loader2 } from "lucide-react";
+import { AlertCircle, Check, FileDown, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { api, ApiRequestError } from "@/lib/api-client";
 import { setPageTitleInCache, usePage, type PageFull, type PageMeta } from "@/lib/pages";
 import type { Block } from "@/lib/page-content";
+import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import { BlockEditor } from "./BlockEditor";
 import { ErrorState, LoadingState } from "@/components/app/PageStates";
 import { Button } from "@/components/ui/button";
@@ -113,9 +115,46 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
     };
   }, [flush]);
 
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportPdf = useCallback(async () => {
+    if (isExporting) return;
+    setIsExporting(true);
+    const toastId = toast.loading("Exporting note to PDF...");
+    try {
+      await exportNoteToPdf({
+        title: latest.current.title,
+        blocks: latest.current.blocks,
+      });
+      toast.success("Note PDF downloaded successfully", { id: toastId });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to generate PDF";
+      toast.error(`Export failed: ${msg}`, { id: toastId });
+    } finally {
+      setIsExporting(false);
+    }
+  }, [isExporting]);
+
   return (
     <div className="mx-auto w-full max-w-[720px] px-5 pb-32 pt-6 md:px-10 md:pt-10">
-      <div className="mb-2 flex h-6 items-center justify-end">
+      <div className="mb-3 flex h-8 items-center justify-between">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleExportPdf}
+          disabled={isExporting}
+          className="h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium text-muted-foreground shadow-none transition-all hover:bg-accent hover:text-foreground active:scale-95"
+          title="Export note as PDF"
+          aria-label="Export as PDF"
+        >
+          {isExporting ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+          ) : (
+            <FileDown className="h-3.5 w-3.5 text-primary" />
+          )}
+          <span>Export as PDF</span>
+        </Button>
         <SaveStatus status={status} onRetry={() => { setStatus("dirty"); void flush(); }} />
       </div>
       {status === "conflict" && (
@@ -146,7 +185,13 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
         }}
         className="mb-4 block w-full resize-none overflow-hidden bg-transparent text-3xl font-semibold leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50 md:text-4xl"
       />
-      <BlockEditor blocks={blocks} onChange={(b) => edit({ blocks: b })} focusFirstSignal={focusFirst} />
+      <BlockEditor
+        blocks={blocks}
+        onChange={(b) => edit({ blocks: b })}
+        focusFirstSignal={focusFirst}
+        onExportPdf={handleExportPdf}
+        isExporting={isExporting}
+      />
     </div>
   );
 }
