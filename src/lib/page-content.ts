@@ -12,6 +12,7 @@ export const BLOCK_TYPES = [
   "callout",
   "code",
   "divider",
+  "image",
 ] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
@@ -25,6 +26,10 @@ export const BlockSchema = z.object({
   checked: z.boolean().optional(),
   language: z.string().max(40).optional(),
   calloutType: z.enum(CALLOUT_TYPES).optional(),
+  url: z.string().max(2000).optional(),
+  caption: z.string().max(1000).optional(),
+  alt: z.string().max(255).optional(),
+  fileSize: z.number().int().optional(),
 });
 export const ContentSchema = z.object({ blocks: z.array(BlockSchema).max(5000) });
 
@@ -60,6 +65,10 @@ export function parseContent(raw: string | null | undefined): PageContent {
         checked?: unknown;
         language?: unknown;
         calloutType?: unknown;
+        url?: unknown;
+        caption?: unknown;
+        alt?: unknown;
+        fileSize?: unknown;
       }
       for (const item of rawBlocks) {
         if (item && typeof item === "object") {
@@ -79,6 +88,18 @@ export function parseContent(raw: string | null | undefined): PageContent {
             ...(type === "callout" &&
             (CALLOUT_TYPES as readonly string[]).includes(String(rawItem.calloutType))
               ? { calloutType: rawItem.calloutType as CalloutType }
+              : {}),
+            ...(type === "image" && typeof rawItem.url === "string"
+              ? { url: rawItem.url.slice(0, 2000) }
+              : {}),
+            ...(type === "image" && typeof rawItem.caption === "string"
+              ? { caption: rawItem.caption.slice(0, 1000) }
+              : {}),
+            ...(type === "image" && typeof rawItem.alt === "string"
+              ? { alt: rawItem.alt.slice(0, 255) }
+              : {}),
+            ...(type === "image" && typeof rawItem.fileSize === "number"
+              ? { fileSize: Math.floor(rawItem.fileSize) }
               : {}),
           });
         }

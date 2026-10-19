@@ -34,6 +34,7 @@ import {
   Minus,
   MoreHorizontal,
   NotebookPen,
+  Pin,
   Plus,
   Redo2,
   RotateCcw,
@@ -117,6 +118,8 @@ function Editor({ map }: { map: MindMapFull }) {
   const isLockedRef = useRef(isLocked);
   isLockedRef.current = isLocked;
   const [lockLoading, setLockLoading] = useState(false);
+  const [isPinned, setIsPinned] = useState(Boolean(map.is_pinned));
+  const [pinLoading, setPinLoading] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -248,6 +251,24 @@ function Editor({ map }: { map: MindMapFull }) {
       }
     } finally {
       setLockLoading(false);
+    }
+  };
+
+  const togglePin = async () => {
+    if (pinLoading) return;
+    const target = !isPinned;
+    setPinLoading(true);
+    try {
+      await api<MindMapMeta>(`/api/mind-maps/${map.id}`, {
+        method: "PATCH",
+        body: { is_pinned: target },
+      });
+      setIsPinned(target);
+      toast.success(target ? "Mind map pinned" : "Mind map unpinned");
+    } catch {
+      toast.error("Couldn't update pin status");
+    } finally {
+      setPinLoading(false);
     }
   };
 
@@ -392,7 +413,12 @@ function Editor({ map }: { map: MindMapFull }) {
   }, [doc.nodes, doc.links, hidden, byId, selectedLink]);
 
   const dropRef = useRef<string | null>(null);
-  const drag = useRef<{ ids: Set<string>; moved: boolean } | null>(null);
+  const drag = useRef<{
+    ids: Set<string>;
+    moved: boolean;
+    snapshot: MapDoc;
+    historyPushed: boolean;
+  } | null>(null);
   const onNodesChange = useCallback(
     (changes: NodeChange<TopicRFNode>[]) => {
       let changed = false;
@@ -414,6 +440,11 @@ function Editor({ map }: { map: MindMapFull }) {
           const dx = c.position.x - cur.x,
             dy = c.position.y - cur.y;
           if (!dx && !dy) continue;
+          if (!g.historyPushed) {
+            pushHistory(g.snapshot);
+            lastKey.current = null;
+            g.historyPushed = true;
+          }
           g.moved = true;
           setDoc({
             ...d,
@@ -604,12 +635,12 @@ function Editor({ map }: { map: MindMapFull }) {
   // ---------- drag: moves the whole branch (Alt/Option = only this topic); drop on a topic to reparent ----------
   const onNodeDragStart: OnNodeDrag<TopicRFNode> = (e, node) => {
     if (isLockedRef.current) return;
-    pushHistory(docRef.current);
-    lastKey.current = null;
     const alt = "altKey" in e && (e as MouseEvent).altKey;
     drag.current = {
       ids: new Set(alt ? [node.id] : branchIds(docRef.current.nodes, node.id)),
       moved: false,
+      snapshot: docRef.current,
+      historyPushed: false,
     };
     select(node.id);
     setDragging(true);
@@ -649,11 +680,7 @@ function Editor({ map }: { map: MindMapFull }) {
     const target = dropRef.current;
     dropRef.current = null;
     setDropTarget(null);
-    if (!g) return;
-    if (!g.moved) {
-      past.current.pop();
-      return;
-    }
+    if (!g || !g.moved) return;
     const d = docRef.current;
     const n = d.nodes.find((x) => x.id === node.id);
     if (!target || !n?.parentId) {
@@ -1026,6 +1053,34 @@ function Editor({ map }: { map: MindMapFull }) {
               </TooltipTrigger>
               <TooltipContent side="bottom">
                 {isLocked ? "Unlock Mind Map" : "Lock Mind Map"}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <TooltipProvider delayDuration={200}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant={isPinned ? "secondary" : "ghost"}
+                  size="icon"
+                  aria-label={isPinned ? "Unpin Mind Map" : "Pin Mind Map"}
+                  title={isPinned ? "Unpin Mind Map" : "Pin Mind Map"}
+                  disabled={pinLoading}
+                  onClick={togglePin}
+                  className={cn(
+                    "relative transition-all duration-200",
+                    isPinned && "border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
+                  )}
+                >
+                  {isPinned ? (
+                    <Pin className="h-4 w-4 fill-primary/20 rotate-45 text-primary" />
+                  ) : (
+                    <Pin className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {isPinned ? "Unpin Mind Map" : "Pin Mind Map"}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
