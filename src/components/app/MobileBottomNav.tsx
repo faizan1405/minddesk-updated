@@ -2,9 +2,11 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   CheckCircle2, Repeat, NotebookPen, LayoutGrid, FolderKanban, CalendarDays, Clock, Network,
-  Settings, UserRound, BarChart3, LayoutTemplate, Trash2, type LucideIcon,
+  Settings, UserRound, BarChart3, LayoutTemplate, Trash2, Pin, type LucideIcon,
 } from "lucide-react";
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer";
+import { pageTitle, usePages, useProjects } from "@/lib/pages";
+import { useMindMaps } from "@/lib/mindmaps";
 import { cn } from "@/lib/utils";
 
 export type NavGroup = "tasks" | "habits" | "notes" | "more";
@@ -54,6 +56,15 @@ export function MobileBottomNav() {
   const group = navGroupFor(path);
   const [moreOpen, setMoreOpen] = useState(false);
   const [typing, setTyping] = useState(false);
+
+  const { data: pages } = usePages();
+  const { data: projects } = useProjects();
+  const { data: mindMaps } = useMindMaps();
+
+  const pinnedProjects = (projects || []).filter((p) => p.is_pinned);
+  const pinnedNotes = (pages || []).filter((p) => p.is_pinned);
+  const pinnedMindMaps = (mindMaps || []).filter((m) => m.is_pinned);
+  const totalPinned = pinnedProjects.length + pinnedNotes.length + pinnedMindMaps.length;
 
   // Close the panel on any navigation (incl. Android/browser back).
   useEffect(() => { setMoreOpen(false); }, [path]);
@@ -119,6 +130,54 @@ export function MobileBottomNav() {
         <DrawerContent className="border-sidebar-border bg-sidebar pb-[max(1rem,env(safe-area-inset-bottom))]">
           <DrawerTitle className="px-5 pt-3 text-base font-semibold tracking-tight">More</DrawerTitle>
           <DrawerDescription className="sr-only">Other MindDesk sections</DrawerDescription>
+
+          {totalPinned > 0 && (
+            <div className="px-4 pt-2">
+              <div className="flex items-center gap-1.5 px-1 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Pin className="h-3 w-3 rotate-45 fill-amber-500/20 text-amber-500" />
+                <span>Pinned ({totalPinned})</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {pinnedProjects.map((p) => (
+                  <Link
+                    key={`mob-pin-proj-${p.id}`}
+                    to="/projects/$projectId"
+                    params={{ projectId: p.id }}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex max-w-[160px] items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors active:bg-accent"
+                  >
+                    <FolderKanban className="h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span className="truncate">{p.title}</span>
+                  </Link>
+                ))}
+                {pinnedNotes.map((n) => (
+                  <Link
+                    key={`mob-pin-note-${n.id}`}
+                    to={n.project_id ? "/projects/$projectId/$pageId" : "/notes/$pageId"}
+                    params={n.project_id ? { projectId: n.project_id, pageId: n.id } : { pageId: n.id }}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex max-w-[160px] items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors active:bg-accent"
+                  >
+                    <NotebookPen className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+                    <span className="truncate">{pageTitle(n)}</span>
+                  </Link>
+                ))}
+                {pinnedMindMaps.map((m) => (
+                  <Link
+                    key={`mob-pin-map-${m.id}`}
+                    to="/mind-maps/$mapId"
+                    params={{ mapId: m.id }}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex max-w-[160px] items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors active:bg-accent"
+                  >
+                    <Network className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                    <span className="truncate">{m.title}</span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
           <ul className="grid grid-cols-3 gap-2 p-4">
             {moreItems.map((m) => {
               const active = path === m.url || path.startsWith(m.url + "/");

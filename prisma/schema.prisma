@@ -30,6 +30,7 @@ model User {
   habits         Habit[]
   routines       Routine[]
   habitCompletions HabitCompletion[]
+  noteImages   NoteImage[]
   settings     UserSettings?
 
   @@map("users")
@@ -96,6 +97,7 @@ model Project {
   userId    String    @map("user_id") @db.Char(36)
   title     String    @db.VarChar(200)
   position  Float     @default(0)
+  isPinned  Boolean   @default(false) @map("is_pinned")
   deletedAt DateTime? @map("deleted_at")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -104,6 +106,7 @@ model Project {
 
   @@index([userId, position])
   @@index([userId, deletedAt])
+  @@index([userId, isPinned])
   @@map("projects")
 }
 
@@ -118,6 +121,7 @@ model Page {
   content   String    @db.LongText
   version   Int       @default(1)
   position  Float     @default(0)
+  isPinned  Boolean   @default(false) @map("is_pinned")
   deletedAt DateTime? @map("deleted_at")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -129,6 +133,7 @@ model Page {
   @@index([userId, projectId])
   @@index([parentId])
   @@index([userId, deletedAt])
+  @@index([userId, isPinned])
   @@map("pages")
 }
 
@@ -244,6 +249,7 @@ model MindMap {
   title     String    @db.VarChar(200)
   data      String    @db.LongText
   isLocked  Boolean   @default(false) @map("is_locked")
+  isPinned  Boolean   @default(false) @map("is_pinned")
   nodeCount Int       @default(1) @map("node_count")
   version   Int       @default(1)
   deletedAt DateTime? @map("deleted_at")
@@ -253,6 +259,7 @@ model MindMap {
 
   @@index([userId, updatedAt])
   @@index([userId, deletedAt])
+  @@index([userId, isPinned])
   @@map("mind_maps")
 }
 
@@ -321,4 +328,18 @@ model UserSettings {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+model NoteImage {
+  id         String   @id @default(uuid()) @db.Char(36)
+  userId     String   @map("user_id") @db.Char(36)
+  fileName   String   @map("file_name") @db.VarChar(255)
+  fileSize   Int      @map("file_size")
+  mimeType   String   @map("mime_type") @db.VarChar(100)
+  storageKey String   @map("storage_key") @db.VarChar(255)
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("note_images")
 }

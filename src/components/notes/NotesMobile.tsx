@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ChevronRight, FileDown, FileText, Layers, MoreHorizontal, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileDown, FileText, Layers, MoreHorizontal, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,8 +35,13 @@ function NoteCard({ page, pages, context }: { page: PageMeta; pages: PageMeta[];
       </span>
       <span className="min-w-0 flex-1">
         {context && <span className="block truncate text-[11px] text-muted-foreground">{context}</span>}
-        <span className={cn("block truncate text-[15px] font-medium", !page.title.trim() && "text-muted-foreground")}>
-          {pageTitle(page)}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className={cn("block truncate text-[15px] font-medium", !page.title.trim() && "text-muted-foreground")}>
+            {pageTitle(page)}
+          </span>
+          {page.is_pinned && (
+            <Pin className="h-3.5 w-3.5 shrink-0 rotate-45 fill-primary/20 text-primary" aria-label="Pinned" />
+          )}
         </span>
         <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
           {date && <span>Edited {date}</span>}
@@ -54,7 +59,15 @@ function NoteCard({ page, pages, context }: { page: PageMeta; pages: PageMeta[];
 export function NotesMobileList({ pages, onCreate, pending }: { pages: PageMeta[]; onCreate: () => void; pending: boolean }) {
   const [q, setQ] = useState("");
   const term = q.trim().toLowerCase();
-  const top = pages.filter((p) => p.parent_id === null);
+  const top = useMemo(() => {
+    const list = pages.filter((p) => p.parent_id === null);
+    return [...list].sort((a, b) => {
+      const aPin = a.is_pinned ? 1 : 0;
+      const bPin = b.is_pinned ? 1 : 0;
+      if (aPin !== bPin) return bPin - aPin;
+      return 0;
+    });
+  }, [pages]);
   const results = useMemo(
     () => (term ? pages.filter((p) => pageTitle(p).toLowerCase().includes(term)) : []),
     [pages, term],
@@ -114,7 +127,7 @@ export function NoteMobileBar({
   pages, current, onAddSub, pending,
 }: { pages: PageMeta[]; current: PageMeta; onAddSub: () => void; pending: boolean }) {
   const navigate = useNavigate();
-  const { renamePage, deletePage } = usePageActions();
+  const { renamePage, deletePage, togglePinPage } = usePageActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const trail = ancestors(pages, current.id);
@@ -153,6 +166,20 @@ export function NoteMobileBar({
       <nav aria-label="Breadcrumb" className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
         {trail.length > 1 && trail.slice(0, -1).map(pageTitle).join(" › ")}
       </nav>
+      <Button
+        variant={current.is_pinned ? "secondary" : "ghost"}
+        size="icon"
+        className="h-10 w-10 shrink-0"
+        aria-label={current.is_pinned ? "Unpin note" : "Pin note"}
+        title={current.is_pinned ? "Unpin note" : "Pin note"}
+        onClick={() => togglePinPage.mutate({ id: current.id, pinned: !current.is_pinned })}
+      >
+        {current.is_pinned ? (
+          <Pin className="h-4 w-4 fill-primary/20 rotate-45 text-primary" />
+        ) : (
+          <Pin className="h-4 w-4 text-muted-foreground" />
+        )}
+      </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon" className="h-10 w-10 shrink-0" aria-label="Note actions">
@@ -160,6 +187,11 @@ export function NoteMobileBar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onSelect={() => togglePinPage.mutate({ id: current.id, pinned: !current.is_pinned })}>
+            {current.is_pinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
+            <span>{current.is_pinned ? "Unpin note" : "Pin note"}</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
           <DropdownMenuItem disabled={pending} onSelect={onAddSub}>Add subpage</DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -184,7 +216,15 @@ export function NoteMobileBar({
 export function NoteMobileSubpages({
   pages, current, onAddSub, pending,
 }: { pages: PageMeta[]; current: PageMeta; onAddSub: () => void; pending: boolean }) {
-  const kids = pages.filter((p) => p.parent_id === current.id);
+  const kids = useMemo(() => {
+    const list = pages.filter((p) => p.parent_id === current.id);
+    return [...list].sort((a, b) => {
+      const aPin = a.is_pinned ? 1 : 0;
+      const bPin = b.is_pinned ? 1 : 0;
+      if (aPin !== bPin) return bPin - aPin;
+      return 0;
+    });
+  }, [pages, current.id]);
   return (
     <section className="mx-auto w-full max-w-[720px] px-5 pb-28">
       <div className="mb-2 flex items-center justify-between border-t pt-4">

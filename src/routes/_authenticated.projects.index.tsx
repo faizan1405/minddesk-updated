@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { FolderKanban, MoreHorizontal, Plus } from "lucide-react";
+import { FolderKanban, MoreHorizontal, Pin, PinOff, Plus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,16 @@ function ProjectsHome() {
   const { createProject } = usePageActions();
   const [creating, setCreating] = useState(false);
 
+  const sortedProjects = useMemo(() => {
+    if (!projects.data) return [];
+    return [...projects.data].sort((a, b) => {
+      const aPin = a.is_pinned ? 1 : 0;
+      const bPin = b.is_pinned ? 1 : 0;
+      if (aPin !== bPin) return bPin - aPin;
+      return 0;
+    });
+  }, [projects.data]);
+
   if (projects.isPending) return <LoadingState />;
   if (projects.error) return <ErrorState message={projects.error.message} onRetry={() => projects.refetch()} />;
 
@@ -35,7 +45,7 @@ function ProjectsHome() {
         </Button>
       </div>
 
-      {projects.data.length === 0 ? (
+      {sortedProjects.length === 0 ? (
         <div className="mx-auto mt-16 max-w-sm text-center">
           <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl border bg-card">
             <FolderKanban className="h-5 w-5 text-primary" />
@@ -45,7 +55,7 @@ function ProjectsHome() {
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.data.map((p) => <ProjectCard key={p.id} project={p} pageCount={countFor(p.id)} />)}
+          {sortedProjects.map((p) => <ProjectCard key={p.id} project={p} pageCount={countFor(p.id)} />)}
         </div>
       )}
 
@@ -56,7 +66,7 @@ function ProjectsHome() {
 }
 
 function ProjectCard({ project, pageCount }: { project: Project; pageCount: number }) {
-  const { renameProject, deleteProject } = usePageActions();
+  const { renameProject, deleteProject, togglePinProject } = usePageActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -64,7 +74,14 @@ function ProjectCard({ project, pageCount }: { project: Project; pageCount: numb
     <div className="group relative rounded-2xl border bg-card transition-colors hover:border-primary/40">
       <Link to="/projects/$projectId" params={{ projectId: project.id }} className="block p-5 pr-12">
         <FolderKanban className="mb-4 h-5 w-5 text-primary" />
-        <div className="truncate font-medium">{project.title}</div>
+        <div className="flex items-center gap-1.5 font-medium min-w-0">
+          <span className="truncate">{project.title}</span>
+          {project.is_pinned && (
+            <span title="Pinned">
+              <Pin className="h-3.5 w-3.5 shrink-0 fill-primary/20 text-primary rotate-45" aria-label="Pinned" />
+            </span>
+          )}
+        </div>
         <div className="mt-1 text-xs text-muted-foreground">
           {pageCount} page{pageCount === 1 ? "" : "s"} · updated {formatDistanceToNow(new Date(project.updated_at), { addSuffix: true })}
         </div>
@@ -77,6 +94,11 @@ function ProjectCard({ project, pageCount }: { project: Project; pageCount: numb
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => togglePinProject.mutate({ id: project.id, pinned: !project.is_pinned })}>
+            {project.is_pinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
+            <span>{project.is_pinned ? "Unpin project" : "Pin project"}</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
