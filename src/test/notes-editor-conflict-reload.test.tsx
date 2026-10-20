@@ -178,7 +178,7 @@ describe("Notes Editor 409 Conflict & Load Latest Version Regression Tests", () 
     expect(serverDoc.content.blocks[0]!.text).toBe("Device A edits on top of v2 successfully!");
   });
 
-  it("does not discard unsaved user content if reload request fails", async () => {
+  it("does not discard unsaved user content if reload request fails, allows edits, and recovers on retry", async () => {
     render(
       <QueryClientProvider client={queryClient}>
         <PageEditor pageId="page-conflict-1" />
@@ -216,7 +216,108 @@ describe("Notes Editor 409 Conflict & Load Latest Version Regression Tests", () 
       fireEvent.click(loadLatestBtn);
     });
 
-    // The reload failed, so the editor MUST NOT have remounted with lost content!
-    expect(textarea.value).toBe("Critical local draft that must not be lost");
+    // 1. VERIFY: The original textarea is STILL attached to the document
+    expect(document.body.contains(textarea)).toBe(true);
+
+    // 2. VERIFY: ErrorState was NOT rendered
+    expect(screen.queryByText("Couldn't load your tasks")).toBeNull();
+
+    // 3. VERIFY: The textarea remains accessible through the rendered UI with unsaved draft intact
+    expect(screen.getByDisplayValue("Critical local draft that must not be lost")).toBe(textarea);
+
+    // 4. VERIFY: The textarea is STILL editable despite the failed refetch
+    act(() => {
+      fireEvent.change(textarea, {
+        target: { value: "Critical local draft plus offline modifications" },
+      });
+    });
+    expect(textarea.value).toBe("Critical local draft plus offline modifications");
+    expect(screen.getByDisplayValue("Critical local draft plus offline modifications")).toBe(
+      textarea,
+    );
+
+    // 5. VERIFY: Subsequent retry succeeds and loads the correct server version
+    const retryBtn = screen.getByRole("button", { name: "Load latest version" });
+    expect(retryBtn).toBeDefined();
+
+    serverDoc = {
+      ...serverDoc,
+      title: "Server v2 Title",
+      version: 2,
+      content: {
+        blocks: [{ id: "b1", type: "p", text: "Server v2 content" }],
+      },
+    };
+
+    await act(async () => {
+      fireEvent.click(retryBtn);
+    });
+
+    // Editor remounts with server v2 content
+    const reloadedTextarea = (await screen.findByDisplayValue(
+      "Server v2 content",
+    )) as HTMLTextAreaElement;
+    expect(reloadedTextarea).toBeDefined();
+    expect(screen.getByDisplayValue("Server v2 Title")).toBeDefined();
+    expect(
+      screen.queryByText(
+        "This page was changed on another device. Your latest edits here were not saved.",
+      ),
+    ).toBeNull();
+
+    // Subsequent edit saves against base_version: 2
+    act(() => {
+      fireEvent.change(reloadedTextarea, {
+        target: { value: "Edits on server v2 after successful retry" },
+      });
+    });
+
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1200));
+    });
+
+    expect(serverDoc.version).toBe(3);
+    expect(serverDoc.content.blocks[0]!.text).toBe("Edits on server v2 after successful retry");
+  });
+
+  it("keeps open editor mounted and preserves unsaved draft when background refetch fails", async () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PageEditor pageId="page-conflict-1" />
+      </QueryClientProvider>,
+    );
+
+    const textarea = (await screen.findByDisplayValue(
+      "Version 1 server content",
+    )) as HTMLTextAreaElement;
+
+    act(() => {
+      fireEvent.change(textarea, {
+        target: { value: "Draft in progress" },
+      });
+    });
+    expect(textarea.value).toBe("Draft in progress");
+
+    // Simulate background refetch failure
+    apiSpy.mockImplementationOnce(async () => {
+      throw new Error("Background network error");
+    });
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["page", "page-conflict-1"] });
+    });
+
+    // Editor MUST still be mounted, textarea attached and editable, and draft intact
+    expect(document.body.contains(textarea)).toBe(true);
+    expect(screen.queryByText("Couldn't load your tasks")).toBeNull();
+    expect(screen.getByDisplayValue("Draft in progress")).toBe(textarea);
+
+    act(() => {
+      fireEvent.change(textarea, {
+        target: { value: "Draft in progress with more typing" },
+      });
+    });
+    expect(textarea.value).toBe("Draft in progress with more typing");
+    expect(document.body.contains(textarea)).toBe(true);
   });
 });

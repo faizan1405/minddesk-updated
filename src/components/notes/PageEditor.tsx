@@ -28,6 +28,7 @@ export function PageEditor({ pageId }: { pageId: string }) {
   const [reloadCounter, setReloadCounter] = useState(0);
   const [isReloading, setIsReloading] = useState(false);
   const q = usePage(pageId);
+  const lastReportedErrorRef = useRef<unknown>(null);
 
   const handleReload = useCallback(async () => {
     if (isReloading) return;
@@ -38,9 +39,11 @@ export function PageEditor({ pageId }: { pageId: string }) {
         setReloadCounter((c) => c + 1);
         toast.success("Loaded latest version");
       } else if (res.error) {
+        lastReportedErrorRef.current = res.error;
         toast.error(`Could not reload latest version: ${res.error.message}`);
       }
     } catch (err) {
+      lastReportedErrorRef.current = err;
       const msg = err instanceof Error ? err.message : "Failed to reload";
       toast.error(`Could not reload latest version: ${msg}`);
     } finally {
@@ -48,8 +51,21 @@ export function PageEditor({ pageId }: { pageId: string }) {
     }
   }, [isReloading, q]);
 
-  if (q.isPending) return <LoadingState />;
-  if (q.error) return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
+  useEffect(() => {
+    if (q.error && q.data && q.error !== lastReportedErrorRef.current) {
+      lastReportedErrorRef.current = q.error;
+      toast.error(`Failed to refresh note: ${q.error.message}`);
+    } else if (!q.error) {
+      lastReportedErrorRef.current = null;
+    }
+  }, [q.error, q.data]);
+
+  // Only show full ErrorState or LoadingState when there is no usable cached note data
+  if (q.isPending && !q.data) return <LoadingState />;
+  if (q.error && !q.data)
+    return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
+  if (!q.data) return <LoadingState />;
+
   // Remount per pageId or explicit user reload, but never on metadata query updates like pin/unpin
   return (
     <LoadedEditor
