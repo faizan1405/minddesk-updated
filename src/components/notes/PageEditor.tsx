@@ -26,7 +26,28 @@ const DEBOUNCE_MS = 800;
 
 export function PageEditor({ pageId }: { pageId: string }) {
   const [reloadCounter, setReloadCounter] = useState(0);
+  const [isReloading, setIsReloading] = useState(false);
   const q = usePage(pageId);
+
+  const handleReload = useCallback(async () => {
+    if (isReloading) return;
+    setIsReloading(true);
+    try {
+      const res = await q.refetch();
+      if (res.isSuccess && res.data) {
+        setReloadCounter((c) => c + 1);
+        toast.success("Loaded latest version");
+      } else if (res.error) {
+        toast.error(`Could not reload latest version: ${res.error.message}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reload";
+      toast.error(`Could not reload latest version: ${msg}`);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [isReloading, q]);
+
   if (q.isPending) return <LoadingState />;
   if (q.error) return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
   // Remount per pageId or explicit user reload, but never on metadata query updates like pin/unpin
@@ -34,15 +55,21 @@ export function PageEditor({ pageId }: { pageId: string }) {
     <LoadedEditor
       key={`${pageId}:${reloadCounter}`}
       page={q.data}
-      onReload={() => {
-        setReloadCounter((c) => c + 1);
-        void q.refetch();
-      }}
+      onReload={handleReload}
+      isReloading={isReloading}
     />
   );
 }
 
-function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void }) {
+function LoadedEditor({
+  page,
+  onReload,
+  isReloading,
+}: {
+  page: PageFull;
+  onReload: () => void | Promise<void>;
+  isReloading?: boolean;
+}) {
   const qc = useQueryClient();
   const { togglePinPage } = usePageActions();
 
@@ -430,8 +457,15 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
           <span className="flex-1">
             This page was changed on another device. Your latest edits here were not saved.
           </span>
-          <Button size="sm" variant="outline" onClick={onReload}>
-            Load latest version
+          <Button size="sm" variant="outline" onClick={onReload} disabled={isReloading}>
+            {isReloading ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin text-primary" />
+                Loading…
+              </>
+            ) : (
+              "Load latest version"
+            )}
           </Button>
         </div>
       )}
