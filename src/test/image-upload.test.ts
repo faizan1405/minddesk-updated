@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as imagesServer from "@/lib/server/images.server";
 import {
   validateImageSignature,
   extensionForMime,
@@ -8,6 +9,7 @@ import {
   saveImageFile,
 } from "@/lib/server/images.server";
 import * as apiServer from "@/lib/server/api.server";
+import { Route as ImagesRoute } from "@/routes/api.images";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -149,6 +151,195 @@ describe("Image Storage & Security System (Feature 4)", () => {
       const getRes = previewRequest("GET", `/api/images/${data.id}`);
       expect(getRes.status).toBe(200);
       expect((getRes.data as { id: string }).id).toBe(data.id);
+    });
+  });
+
+  describe("Upload Size Enforcement & Multipart Boundaries (Issue 3)", () => {
+    it("accepts normal multipart upload with valid PNG and returns 201", async () => {
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+      } as unknown as Awaited<ReturnType<typeof apiServer.requireUser>>);
+      vi.spyOn(imagesServer, "saveImageFile").mockResolvedValue({
+        id: "img-123",
+        url: "/api/images/img-123",
+        fileName: "test.png",
+        fileSize: 12,
+        mimeType: "image/png",
+      });
+
+      const validPng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
+      const boundary = "----TestBoundary123";
+      const body = Buffer.concat([
+        Buffer.from(
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="test.png"\r\nContent-Type: image/png\r\n\r\n`,
+        ),
+        validPng,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+
+      const req = new Request("http://localhost/api/images", {
+        method: "POST",
+        headers: {
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+          "content-length": String(body.length),
+        },
+        body,
+      });
+
+      const handlers = (
+        ImagesRoute.options as unknown as {
+          server: { handlers: { POST: (ctx: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers;
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { id: string };
+      expect(json.id).toBe("img-123");
+    });
+
+    it("rejects oversized multipart upload via Content-Length header with 413", async () => {
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+      } as unknown as Awaited<ReturnType<typeof apiServer.requireUser>>);
+
+      const oversizedBytes = 11 * 1024 * 1024; // 11 MB (> 10MB + 64KB envelope)
+      const req = new Request("http://localhost/api/images", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=----WebKitFormBoundaryXYZ",
+          "content-length": String(oversizedBytes),
+        },
+        body: new Uint8Array(10),
+      });
+
+      const handlers = (
+        ImagesRoute.options as unknown as {
+          server: { handlers: { POST: (ctx: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers;
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(413);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toBe("Image exceeds maximum allowed size (10 MB).");
+    });
+
+    it("rejects oversized multipart upload WITHOUT Content-Length before full buffering with 413", async () => {
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+      } as unknown as Awaited<ReturnType<typeof apiServer.requireUser>>);
+
+      // Create a stream that emits 12 MB across multiple chunks without a content-length header
+      const chunk = new Uint8Array(2 * 1024 * 1024); // 2 MB chunks
+      let chunksSent = 0;
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (chunksSent < 6) {
+            // 6 * 2MB = 12 MB total
+            controller.enqueue(chunk);
+            chunksSent++;
+          } else {
+            controller.close();
+          }
+        },
+      });
+
+      const req = new Request("http://localhost/api/images", {
+        method: "POST",
+        headers: {
+          "content-type": "multipart/form-data; boundary=----StreamBoundaryXYZ",
+          // Note: NO content-length header!
+        },
+        body: stream,
+        // @ts-expect-error duplex required for streaming request body in Node
+        duplex: "half",
+      });
+
+      const handlers = (
+        ImagesRoute.options as unknown as {
+          server: { handlers: { POST: (ctx: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers;
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(413);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toBe("Image exceeds maximum allowed size (10 MB).");
+    });
+
+    it("rejects multipart request where envelope is under bound but extracted file exceeds 10 MB with 413", async () => {
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+      } as unknown as Awaited<ReturnType<typeof apiServer.requireUser>>);
+
+      // 10 MB + 100 bytes file (exceeds 10 MB, but within 10MB + 64KB envelope)
+      const oversizedFileBytes = 10 * 1024 * 1024 + 100;
+      const dummyFileBuffer = new Uint8Array(oversizedFileBytes);
+      const boundary = "----TestBoundaryExact";
+      const header = Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="huge.png"\r\nContent-Type: image/png\r\n\r\n`,
+      );
+      const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
+      const body = Buffer.concat([header, Buffer.from(dummyFileBuffer), footer]);
+
+      const req = new Request("http://localhost/api/images", {
+        method: "POST",
+        headers: {
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+          "content-length": String(body.length),
+        },
+        body,
+      });
+
+      const handlers = (
+        ImagesRoute.options as unknown as {
+          server: { handlers: { POST: (ctx: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers;
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(413);
+      const json = (await res.json()) as { error: string };
+      expect(json.error).toBe("Image exceeds maximum allowed size (10 MB).");
+    });
+
+    it("accepts normal raw binary upload and returns 201", async () => {
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue({
+        id: "user-1",
+        email: "test@example.com",
+      } as unknown as Awaited<ReturnType<typeof apiServer.requireUser>>);
+      vi.spyOn(imagesServer, "saveImageFile").mockResolvedValue({
+        id: "img-raw-1",
+        url: "/api/images/img-raw-1",
+        fileName: "screenshot.png",
+        fileSize: 12,
+        mimeType: "image/png",
+      });
+
+      const validPng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
+      const req = new Request("http://localhost/api/images", {
+        method: "POST",
+        headers: {
+          "content-type": "image/png",
+          "x-filename": "screenshot.png",
+        },
+        body: validPng,
+      });
+
+      const handlers = (
+        ImagesRoute.options as unknown as {
+          server: { handlers: { POST: (ctx: { request: Request }) => Promise<Response> } };
+        }
+      ).server.handlers;
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(201);
+      const json = (await res.json()) as { id: string };
+      expect(json.id).toBe("img-raw-1");
     });
   });
 });

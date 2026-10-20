@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { db, ApiError } from "./api.server";
 
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+export const MAX_MULTIPART_OVERHEAD_BYTES = 64 * 1024; // 64 KB overhead for boundaries and form headers
 
 export const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];

@@ -141,7 +141,11 @@ export function BlockEditor({
   pendingFocusExternal,
 }: {
   blocks: Block[];
-  onChange: (b: Block[], isTyping?: boolean, cursor?: FocusTarget | null) => void;
+  onChange: (
+    b: Block[] | ((prev: Block[]) => Block[]),
+    isTyping?: boolean,
+    cursor?: FocusTarget | null,
+  ) => void;
   focusFirstSignal?: number;
   onExportPdf?: () => void;
   isExporting?: boolean;
@@ -151,6 +155,9 @@ export function BlockEditor({
   onRedo?: () => void;
   pendingFocusExternal?: FocusTarget | null;
 }) {
+  const blocksRef = useRef(blocks);
+  blocksRef.current = blocks;
+
   const refs = useRef(new Map<string, HTMLTextAreaElement>());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceTargetRef = useRef<string | null>(null);
@@ -212,7 +219,6 @@ export function BlockEditor({
 
   const update = useCallback(
     (id: string, patch: Partial<Block>, isTyping = false, cursorOverride?: FocusTarget | null) => {
-      const next = blocks.map((b) => (b.id === id ? { ...b, ...patch } : b));
       const el = refs.current.get(id);
       const cursor: FocusTarget | null =
         cursorOverride !== undefined
@@ -222,9 +228,13 @@ export function BlockEditor({
               pos: el?.selectionStart ?? 0,
               endPos: el?.selectionEnd ?? 0,
             };
-      onChange(next, isTyping, cursor);
+      onChange(
+        (prevBlocks) => prevBlocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+        isTyping,
+        cursor,
+      );
     },
-    [blocks, onChange],
+    [onChange],
   );
 
   function setType(id: string, type: BlockType) {
@@ -275,7 +285,7 @@ export function BlockEditor({
       ...(type === "code" ? { language: "typescript" } : {}),
       ...(type === "callout" ? { calloutType: "info" } : {}),
     };
-    const next = [...blocks];
+    const next = [...blocksRef.current];
     next.splice(index + 1, 0, nb);
     const cursor: FocusTarget = { id: nb.id, pos: 0, endPos: 0 };
     onChange(next, false, cursor);
@@ -284,14 +294,15 @@ export function BlockEditor({
   }
 
   function duplicateBlock(id: string) {
-    const index = blocks.findIndex((b) => b.id === id);
+    const current = blocksRef.current;
+    const index = current.findIndex((b) => b.id === id);
     if (index === -1) return;
-    const source = blocks[index]!;
+    const source = current[index]!;
     const nb: Block = {
       ...source,
       id: newBlockId(),
     };
-    const next = [...blocks];
+    const next = [...current];
     next.splice(index + 1, 0, nb);
     const cursor: FocusTarget = {
       id: nb.id,
@@ -303,14 +314,15 @@ export function BlockEditor({
   }
 
   function deleteBlock(id: string) {
-    if (blocks.length <= 1) {
+    const current = blocksRef.current;
+    if (current.length <= 1) {
       // Keep at least one empty paragraph block
       const emptyBlock: Block = { id: newBlockId(), type: "p", text: "" };
       onChange([emptyBlock], false, { id: emptyBlock.id, pos: 0, endPos: 0 });
       return;
     }
-    const index = blocks.findIndex((b) => b.id === id);
-    const next = blocks.filter((b) => b.id !== id);
+    const index = current.findIndex((b) => b.id === id);
+    const next = current.filter((b) => b.id !== id);
     const targetIdx = Math.max(0, index - 1);
     const target = next[targetIdx];
     const cursor: FocusTarget | null = target
@@ -323,9 +335,10 @@ export function BlockEditor({
   }
 
   function moveBlock(index: number, direction: "up" | "down") {
+    const current = blocksRef.current;
     const targetIdx = direction === "up" ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= blocks.length) return;
-    const next = [...blocks];
+    if (targetIdx < 0 || targetIdx >= current.length) return;
+    const next = [...current];
     const [moved] = next.splice(index, 1);
     if (moved) {
       next.splice(targetIdx, 0, moved);
@@ -478,7 +491,6 @@ export function BlockEditor({
     }
 
     let blockId = targetBlockId;
-    const next = [...blocks];
 
     if (!blockId) {
       const nb: Block = {
@@ -487,15 +499,22 @@ export function BlockEditor({
         text: "",
         caption: "",
       };
-      const idx = insertAfterIndex !== undefined ? insertAfterIndex : blocks.length - 1;
-      const activeBlock = blocks[idx];
-      if (activeBlock && activeBlock.type === "p" && !activeBlock.text.trim()) {
-        next[idx] = nb;
-      } else {
-        next.splice(idx + 1, 0, nb);
-      }
       blockId = nb.id;
-      onChange(next, false, { id: nb.id, pos: 0, endPos: 0 });
+      onChange(
+        (prevBlocks) => {
+          const next = [...prevBlocks];
+          const idx = insertAfterIndex !== undefined ? insertAfterIndex : next.length - 1;
+          const activeBlock = next[idx];
+          if (activeBlock && activeBlock.type === "p" && !activeBlock.text.trim()) {
+            next[idx] = nb;
+          } else {
+            next.splice(idx + 1, 0, nb);
+          }
+          return next;
+        },
+        false,
+        { id: nb.id, pos: 0, endPos: 0 },
+      );
     }
 
     setUploadingIds((prev) => new Set([...prev, blockId!]));
@@ -507,15 +526,23 @@ export function BlockEditor({
 
     try {
       const uploaded = await uploadNoteImage(file);
-      update(
-        blockId!,
-        {
-          url: uploaded.url,
-          fileSize: uploaded.fileSize,
-          alt: file.name,
-          text: file.name,
-        },
+      // Functional updater guarantees that any simultaneous notes edits made
+      // while the upload was in flight are completely preserved!
+      onChange(
+        (prevBlocks) =>
+          prevBlocks.map((b) =>
+            b.id === blockId
+              ? {
+                  ...b,
+                  url: uploaded.url,
+                  fileSize: uploaded.fileSize,
+                  alt: file.name,
+                  text: file.name,
+                }
+              : b,
+          ),
         false,
+        null,
       );
       toast.success("Image uploaded");
     } catch (err) {

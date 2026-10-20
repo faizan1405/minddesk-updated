@@ -1,5 +1,40 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+function parseMultipartBuffer(
+  bodyBuffer: Buffer,
+  contentType: string,
+): { fileName: string; data: Buffer } | null {
+  const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
+  if (!boundaryMatch) return null;
+  const boundary = boundaryMatch[1]!.trim().replace(/^["']|["']$/g, "");
+  const boundaryDelimiter = Buffer.from(`--${boundary}`);
+  const headerEndDelimiter = Buffer.from("\r\n\r\n");
+
+  const startIdx = bodyBuffer.indexOf(boundaryDelimiter);
+  if (startIdx === -1) return null;
+
+  const headerStart = startIdx + boundaryDelimiter.length + 2;
+  const headerEnd = bodyBuffer.indexOf(headerEndDelimiter, headerStart);
+  if (headerEnd === -1) return null;
+
+  const headerText = bodyBuffer.subarray(headerStart, headerEnd).toString("utf8");
+  const filenameMatch = headerText.match(/filename="([^"]+)"/);
+
+  const contentStart = headerEnd + headerEndDelimiter.length;
+  const nextBoundary = bodyBuffer.indexOf(boundaryDelimiter, contentStart);
+  if (nextBoundary === -1) return null;
+
+  let contentEnd = nextBoundary;
+  if (bodyBuffer[contentEnd - 2] === 0x0d && bodyBuffer[contentEnd - 1] === 0x0a) {
+    contentEnd -= 2;
+  }
+
+  return {
+    fileName: filenameMatch && filenameMatch[1] ? filenameMatch[1] : "upload.png",
+    data: bodyBuffer.subarray(contentStart, contentEnd),
+  };
+}
+
 export const Route = createFileRoute("/api/images")({
   server: {
     handlers: {
@@ -9,33 +44,25 @@ export const Route = createFileRoute("/api/images")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
 
-          // Fast rejection: check Content-Length header before reading or buffering payload
+          const contentType = request.headers.get("content-type") || "";
+          const isMultipart = contentType.includes("multipart/form-data");
+          const maxEnvelopeBytes = isMultipart
+            ? images.MAX_IMAGE_SIZE_BYTES + images.MAX_MULTIPART_OVERHEAD_BYTES
+            : images.MAX_IMAGE_SIZE_BYTES;
+
+          // 1. Fast rejection: check Content-Length header before reading payload
           const contentLength = request.headers.get("content-length");
           if (contentLength) {
             const declaredBytes = parseInt(contentLength, 10);
-            if (Number.isFinite(declaredBytes) && declaredBytes > images.MAX_IMAGE_SIZE_BYTES) {
+            if (Number.isFinite(declaredBytes) && declaredBytes > maxEnvelopeBytes) {
               throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
             }
           }
 
-          const contentType = request.headers.get("content-type") || "";
-          let fileName = "upload.png";
-          let buffer: Buffer;
-
-          if (contentType.includes("multipart/form-data")) {
-            const formData = await request.formData();
-            const file = formData.get("file");
-            if (!file || !(file instanceof Blob)) {
-              throw new api.ApiError(400, "No image file provided in form data.");
-            }
-            if (file.size > images.MAX_IMAGE_SIZE_BYTES) {
-              throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
-            }
-            fileName = file instanceof File ? file.name : "upload.png";
-            const arrayBuffer = await file.arrayBuffer();
-            buffer = Buffer.from(arrayBuffer);
-          } else if (request.body) {
-            // Stream chunks with strict byte limit to abort early without buffering huge payloads
+          // 2. Read request body into a bounded buffer before multipart parsing
+          // This safely limits unbuffered memory usage even when Content-Length is absent.
+          let bodyBuffer: Buffer;
+          if (request.body) {
             const reader = request.body.getReader();
             const chunks: Uint8Array[] = [];
             let totalBytes = 0;
@@ -43,30 +70,69 @@ export const Route = createFileRoute("/api/images")({
               const { done, value } = await reader.read();
               if (done) break;
               totalBytes += value.byteLength;
-              if (totalBytes > images.MAX_IMAGE_SIZE_BYTES) {
+              if (totalBytes > maxEnvelopeBytes) {
                 await reader.cancel();
                 throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
               }
               chunks.push(value);
             }
-            buffer = Buffer.concat(chunks);
-            const headerName = request.headers.get("x-filename");
-            if (headerName) fileName = decodeURIComponent(headerName);
+            bodyBuffer = Buffer.concat(chunks);
           } else {
             const arrayBuffer = await request.arrayBuffer();
-            if (arrayBuffer.byteLength > images.MAX_IMAGE_SIZE_BYTES) {
+            if (arrayBuffer.byteLength > maxEnvelopeBytes) {
               throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
             }
-            buffer = Buffer.from(arrayBuffer);
-            const headerName = request.headers.get("x-filename");
-            if (headerName) fileName = decodeURIComponent(headerName);
+            bodyBuffer = Buffer.from(arrayBuffer);
           }
 
-          if (buffer.length === 0) {
+          if (bodyBuffer.length === 0) {
             throw new api.ApiError(400, "Uploaded file is empty.");
           }
 
-          const res = await images.saveImageFile(user.id, fileName, buffer);
+          let fileName = "upload.png";
+          let imageBuffer: Buffer;
+
+          if (isMultipart) {
+            const parsed = parseMultipartBuffer(bodyBuffer, contentType);
+            if (parsed) {
+              if (parsed.data.length > images.MAX_IMAGE_SIZE_BYTES) {
+                throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
+              }
+              fileName = parsed.fileName;
+              imageBuffer = parsed.data;
+            } else {
+              // Fallback to Request.formData() if boundary format differs
+              const boundedRequest = new Request("http://localhost/api/images", {
+                method: "POST",
+                headers: { "content-type": contentType },
+                body: new Uint8Array(bodyBuffer),
+              });
+              const formData = await boundedRequest.formData();
+              const file = formData.get("file");
+              if (!file || !(file instanceof Blob)) {
+                throw new api.ApiError(400, "No image file provided in form data.");
+              }
+              if (file.size > images.MAX_IMAGE_SIZE_BYTES) {
+                throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
+              }
+              fileName = file instanceof File ? file.name : "upload.png";
+              const arrayBuffer = await file.arrayBuffer();
+              imageBuffer = Buffer.from(arrayBuffer);
+            }
+          } else {
+            if (bodyBuffer.length > images.MAX_IMAGE_SIZE_BYTES) {
+              throw new api.ApiError(413, "Image exceeds maximum allowed size (10 MB).");
+            }
+            imageBuffer = bodyBuffer;
+            const headerName = request.headers.get("x-filename");
+            if (headerName) fileName = decodeURIComponent(headerName);
+          }
+
+          if (imageBuffer.length === 0) {
+            throw new api.ApiError(400, "Uploaded file is empty.");
+          }
+
+          const res = await images.saveImageFile(user.id, fileName, imageBuffer);
           return api.json(res, { status: 201 });
         });
       },

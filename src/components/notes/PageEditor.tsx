@@ -120,12 +120,17 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
   }, [flush]);
 
   function edit(
-    next: { title?: string; blocks?: Block[] },
+    next: { title?: string; blocks?: Block[] | ((prev: Block[]) => Block[]) },
     isTyping = false,
     cursor?: FocusTarget,
   ) {
     const nextTitle = next.title !== undefined ? next.title : latest.current.title;
-    const nextBlocks = next.blocks !== undefined ? next.blocks : latest.current.blocks;
+    const nextBlocks =
+      typeof next.blocks === "function"
+        ? next.blocks(latest.current.blocks)
+        : next.blocks !== undefined
+          ? next.blocks
+          : latest.current.blocks;
     const nextDoc = { title: nextTitle, blocks: nextBlocks };
 
     latest.current = nextDoc;
@@ -134,7 +139,7 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
       setPageTitleInCache(qc, page.id, next.title);
     }
     if (next.blocks !== undefined) {
-      setBlocks(next.blocks);
+      setBlocks(nextBlocks);
     }
 
     const typingKey = isTyping
