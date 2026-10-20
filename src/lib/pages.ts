@@ -52,8 +52,12 @@ export function usePageActions() {
   const refreshProjects = () => qc.invalidateQueries({ queryKey: projectsKey });
 
   const createPage = useMutation({
-    mutationFn: (input: { parent_id?: string | null; project_id?: string | null; title?: string; content?: PageContent }) =>
-      api<PageMeta>("/api/pages", { method: "POST", body: input }),
+    mutationFn: (input: {
+      parent_id?: string | null;
+      project_id?: string | null;
+      title?: string;
+      content?: PageContent;
+    }) => api<PageMeta>("/api/pages", { method: "POST", body: input }),
     onSuccess: (page) => {
       qc.setQueryData<PageMeta[]>(pagesKey, (old) => (old ? [...old, page] : old));
       refreshPages();
@@ -74,9 +78,7 @@ export function usePageActions() {
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
       api<PageMeta>(`/api/pages/${id}`, { method: "PATCH", body: { is_pinned: pinned } }),
     onSuccess: (page) => {
-      qc.setQueryData<PageMeta[]>(pagesKey, (old) =>
-        old?.map((p) => (p.id === page.id ? { ...p, is_pinned: Boolean(page.is_pinned) } : p)),
-      );
+      setPagePinInCache(qc, page.id, Boolean(page.is_pinned));
       refreshPages();
       toast.success(page.is_pinned ? "Note pinned" : "Note unpinned");
     },
@@ -93,7 +95,8 @@ export function usePageActions() {
   });
 
   const createProject = useMutation({
-    mutationFn: (title: string) => api<Project>("/api/projects", { method: "POST", body: { title } }),
+    mutationFn: (title: string) =>
+      api<Project>("/api/projects", { method: "POST", body: { title } }),
     onSuccess: () => {
       refreshProjects();
       toast.success("Project created");
@@ -143,8 +146,25 @@ export function usePageActions() {
   };
 }
 
-export function setPageTitleInCache(qc: ReturnType<typeof useQueryClient>, id: string, title: string) {
-  qc.setQueryData<PageMeta[]>(pagesKey, (old) => old?.map((p) => (p.id === id ? { ...p, title } : p)));
+export function setPageTitleInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  id: string,
+  title: string,
+) {
+  qc.setQueryData<PageMeta[]>(pagesKey, (old) =>
+    old?.map((p) => (p.id === id ? { ...p, title } : p)),
+  );
+}
+
+export function setPagePinInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  id: string,
+  isPinned: boolean,
+) {
+  qc.setQueryData<PageMeta[]>(pagesKey, (old) =>
+    old?.map((p) => (p.id === id ? { ...p, is_pinned: isPinned } : p)),
+  );
+  qc.setQueryData<PageFull>(pageKey(id), (old) => (old ? { ...old, is_pinned: isPinned } : old));
 }
 
 /** All descendant ids of a page (for "delete" warnings). */

@@ -25,15 +25,19 @@ type Status = "saved" | "dirty" | "saving" | "error" | "conflict";
 const DEBOUNCE_MS = 800;
 
 export function PageEditor({ pageId }: { pageId: string }) {
+  const [reloadCounter, setReloadCounter] = useState(0);
   const q = usePage(pageId);
   if (q.isPending) return <LoadingState />;
   if (q.error) return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
-  // Remount per page/version so local editing state never leaks between pages.
+  // Remount per pageId or explicit user reload, but never on metadata query updates like pin/unpin
   return (
     <LoadedEditor
-      key={`${q.data.id}:${q.dataUpdatedAt}`}
+      key={`${pageId}:${reloadCounter}`}
       page={q.data}
-      onReload={() => q.refetch()}
+      onReload={() => {
+        setReloadCounter((c) => c + 1);
+        void q.refetch();
+      }}
     />
   );
 }
@@ -41,6 +45,11 @@ export function PageEditor({ pageId }: { pageId: string }) {
 function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void }) {
   const qc = useQueryClient();
   const { togglePinPage } = usePageActions();
+
+  const [isPinned, setIsPinned] = useState(Boolean(page.is_pinned));
+  useEffect(() => {
+    setIsPinned(Boolean(page.is_pinned));
+  }, [page.is_pinned]);
 
   const [title, setTitle] = useState(page.title);
   const [blocks, setBlocks] = useState<Block[]>(page.content.blocks);
@@ -342,25 +351,34 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => togglePinPage.mutate({ id: page.id, pinned: !page.is_pinned })}
+            onClick={() => {
+              const nextPinned = !isPinned;
+              setIsPinned(nextPinned);
+              togglePinPage.mutate(
+                { id: page.id, pinned: nextPinned },
+                {
+                  onError: () => {
+                    setIsPinned(!nextPinned);
+                  },
+                },
+              );
+            }}
             className={cn(
               "h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium shadow-none transition-all hover:bg-accent active:scale-95",
-              page.is_pinned
+              isPinned
                 ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
                 : "text-muted-foreground",
             )}
-            title={page.is_pinned ? "Unpin note" : "Pin note"}
-            aria-label={page.is_pinned ? "Unpin note" : "Pin note"}
+            title={isPinned ? "Unpin note" : "Pin note"}
+            aria-label={isPinned ? "Unpin note" : "Pin note"}
           >
             <Pin
               className={cn(
                 "h-3.5 w-3.5",
-                page.is_pinned
-                  ? "rotate-45 fill-amber-500/30 text-amber-500"
-                  : "text-muted-foreground",
+                isPinned ? "rotate-45 fill-amber-500/30 text-amber-500" : "text-muted-foreground",
               )}
             />
-            <span>{page.is_pinned ? "Pinned" : "Pin"}</span>
+            <span>{isPinned ? "Pinned" : "Pin"}</span>
           </Button>
 
           <Button
