@@ -1,5 +1,5 @@
 // Server-side image storage and validation helper.
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve, extname } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -11,14 +11,14 @@ export const ALLOWED_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as c
 export type AllowedMimeType = (typeof ALLOWED_MIME_TYPES)[number];
 
 export function getStorageDir(): string {
-  const dir = process.env["STORAGE_DIR"]
-    ? resolve(process.env["STORAGE_DIR"])
-    : resolve(process.cwd(), "storage/uploads");
-  if (!existsSync(dir)) {
-    // Synchronously or recursively ensure directory exists
-    // (mkdir with recursive: true is safe)
+  if (process.env["STORAGE_DIR"]) {
+    return resolve(process.env["STORAGE_DIR"]);
   }
-  return dir;
+  // Hostinger Managed Node.js persistent storage outside ephemeral deployment directories
+  if (existsSync("/home/u256504187")) {
+    return "/home/u256504187/storage/minddesk-uploads";
+  }
+  return resolve(process.cwd(), "storage/uploads");
 }
 
 export async function ensureStorageDir(): Promise<string> {
@@ -68,7 +68,10 @@ export function validateImageSignature(buffer: Buffer): AllowedMimeType {
     return "image/webp";
   }
 
-  throw new ApiError(400, "Unsupported or invalid image file. Allowed formats: PNG, JPG/JPEG, WebP.");
+  throw new ApiError(
+    400,
+    "Unsupported or invalid image file. Allowed formats: PNG, JPG/JPEG, WebP.",
+  );
 }
 
 export function extensionForMime(mime: AllowedMimeType): string {
@@ -107,27 +110,37 @@ export async function saveImageFile(
 
   await writeFile(filePath, buffer);
 
-  const prisma = db();
-  const sanitizedName = (fileName || `image.${ext}`).slice(0, 250);
+  try {
+    const prisma = db();
+    const sanitizedName = (fileName || `image.${ext}`).slice(0, 250);
 
-  const record = await prisma.noteImage.create({
-    data: {
-      id,
-      userId,
-      fileName: sanitizedName,
-      fileSize: buffer.length,
-      mimeType,
-      storageKey,
-    },
-  });
+    const record = await prisma.noteImage.create({
+      data: {
+        id,
+        userId,
+        fileName: sanitizedName,
+        fileSize: buffer.length,
+        mimeType,
+        storageKey,
+      },
+    });
 
-  return {
-    id: record.id,
-    url: `/api/images/${record.id}`,
-    fileName: record.fileName,
-    fileSize: record.fileSize,
-    mimeType: record.mimeType as AllowedMimeType,
-  };
+    return {
+      id: record.id,
+      url: `/api/images/${record.id}`,
+      fileName: record.fileName,
+      fileSize: record.fileSize,
+      mimeType: record.mimeType as AllowedMimeType,
+    };
+  } catch (err) {
+    // Prevent an orphaned file on disk when database insertion fails
+    try {
+      await unlink(filePath);
+    } catch {
+      // Best-effort cleanup
+    }
+    throw err;
+  }
 }
 
 export async function readImageFile(

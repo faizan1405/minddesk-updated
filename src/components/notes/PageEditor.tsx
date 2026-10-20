@@ -238,6 +238,7 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
 
       if (e.key.toLowerCase() === "z") {
         e.preventDefault();
+        e.stopPropagation();
         if (e.shiftKey) {
           handleRedo();
         } else {
@@ -245,6 +246,7 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
         }
       } else if (e.key.toLowerCase() === "y" && !e.shiftKey) {
         e.preventDefault();
+        e.stopPropagation();
         handleRedo();
       }
     };

@@ -593,23 +593,9 @@ export function BlockEditor({
       }
     }
 
-    // 2. Keyboard shortcuts (Ctrl+B, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y)
+    // 2. Keyboard shortcuts (Ctrl+B for inline bold)
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-      if (e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) {
-          onRedo?.();
-        } else {
-          onUndo?.();
-        }
-        return;
-      }
-      if (e.key.toLowerCase() === "y" && !e.shiftKey) {
-        e.preventDefault();
-        onRedo?.();
-        return;
-      }
-      if (e.key === "b" || e.key === "B") {
+      if (e.key.toLowerCase() === "b") {
         e.preventDefault();
         applyInlineFormat(b.id, "**");
         return;
@@ -814,7 +800,10 @@ export function BlockEditor({
 
   return (
     <div
-      className={cn("relative transition-colors", isDraggingOver && "rounded-2xl ring-2 ring-primary/60 ring-dashed")}
+      className={cn(
+        "relative transition-colors",
+        isDraggingOver && "rounded-2xl ring-2 ring-primary/60 ring-dashed",
+      )}
       onPaste={handlePaste}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -1154,7 +1143,9 @@ export function BlockEditor({
                       </div>
                     ) : uploadErrors[b.id] ? (
                       <div className="flex flex-col items-center justify-center rounded-xl border border-destructive/40 bg-destructive/10 p-5 text-center">
-                        <p className="mb-2 text-xs font-medium text-destructive">{uploadErrors[b.id]}</p>
+                        <p className="mb-2 text-xs font-medium text-destructive">
+                          {uploadErrors[b.id]}
+                        </p>
                         <div className="flex gap-2">
                           <button
                             type="button"
@@ -1230,8 +1221,12 @@ export function BlockEditor({
                         className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-border/80 bg-muted/20 p-8 text-center transition-colors hover:border-primary/60 hover:bg-accent/40"
                       >
                         <ImageIcon className="mb-2 h-7 w-7 text-muted-foreground" />
-                        <p className="text-xs font-medium text-foreground">Click to select an image</p>
-                        <p className="text-[11px] text-muted-foreground">PNG, JPG, or WebP up to 10 MB</p>
+                        <p className="text-xs font-medium text-foreground">
+                          Click to select an image
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          PNG, JPG, or WebP up to 10 MB
+                        </p>
                       </div>
                     )}
                   </div>

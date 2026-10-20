@@ -5,8 +5,12 @@ import {
   MAX_IMAGE_SIZE_BYTES,
   ALLOWED_MIME_TYPES,
   readImageFile,
+  saveImageFile,
 } from "@/lib/server/images.server";
 import * as apiServer from "@/lib/server/api.server";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 describe("Image Storage & Security System (Feature 4)", () => {
   beforeEach(() => {
@@ -20,34 +24,53 @@ describe("Image Storage & Security System (Feature 4)", () => {
     });
 
     it("accepts valid PNG signature (89 50 4E 47 0D 0A 1A 0A)", () => {
-      const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+      const pngHeader = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
       expect(validateImageSignature(pngHeader)).toBe("image/png");
       expect(extensionForMime("image/png")).toBe("png");
     });
 
     it("accepts valid JPEG signature (FF D8 FF)", () => {
-      const jpegHeader = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+      const jpegHeader = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+      ]);
       expect(validateImageSignature(jpegHeader)).toBe("image/jpeg");
       expect(extensionForMime("image/jpeg")).toBe("jpg");
     });
 
     it("accepts valid WebP signature (RIFF ... WEBP)", () => {
       const webpHeader = Buffer.from([
-        0x52, 0x49, 0x46, 0x46, // "RIFF"
-        0x24, 0x00, 0x00, 0x00, // size
-        0x57, 0x45, 0x42, 0x50, // "WEBP"
+        0x52,
+        0x49,
+        0x46,
+        0x46, // "RIFF"
+        0x24,
+        0x00,
+        0x00,
+        0x00, // size
+        0x57,
+        0x45,
+        0x42,
+        0x50, // "WEBP"
       ]);
       expect(validateImageSignature(webpHeader)).toBe("image/webp");
       expect(extensionForMime("image/webp")).toBe("webp");
     });
 
     it("rejects malicious HTML/JS payloads disguised as images", () => {
-      const htmlPayload = Buffer.from("<script>alert('xss')</script><html><body>hack</body></html>");
-      expect(() => validateImageSignature(htmlPayload)).toThrow("Unsupported or invalid image file");
+      const htmlPayload = Buffer.from(
+        "<script>alert('xss')</script><html><body>hack</body></html>",
+      );
+      expect(() => validateImageSignature(htmlPayload)).toThrow(
+        "Unsupported or invalid image file",
+      );
     });
 
     it("rejects executable binaries (MZ / ELF)", () => {
-      const exePayload = Buffer.from([0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00]);
+      const exePayload = Buffer.from([
+        0x4d, 0x5a, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
+      ]);
       expect(() => validateImageSignature(exePayload)).toThrow("Unsupported or invalid image file");
     });
 
@@ -64,7 +87,9 @@ describe("Image Storage & Security System (Feature 4)", () => {
           findFirst: vi.fn().mockResolvedValue(null), // simulate not owned by this userId
         },
       };
-      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "db").mockReturnValue(
+        mockPrisma as unknown as ReturnType<typeof apiServer.db>,
+      );
 
       await expect(readImageFile("attacker-user-id", "victim-image-id")).rejects.toThrow(
         "Image not found or access denied",
@@ -74,6 +99,35 @@ describe("Image Storage & Security System (Feature 4)", () => {
         where: { id: "victim-image-id", userId: "attacker-user-id" },
       });
     });
+
+    it("prevents orphaned image file on disk when metadata database insertion fails", async () => {
+      const tmpTestDir = path.join(os.tmpdir(), `minddesk-orphan-test-${Date.now()}`);
+      process.env["STORAGE_DIR"] = tmpTestDir;
+
+      const mockPrisma = {
+        noteImage: {
+          create: vi.fn().mockRejectedValue(new Error("Database connection dropped")),
+        },
+      };
+      vi.spyOn(apiServer, "db").mockReturnValue(
+        mockPrisma as unknown as ReturnType<typeof apiServer.db>,
+      );
+
+      const validPng = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+      ]);
+
+      await expect(saveImageFile("user-1", "test.png", validPng)).rejects.toThrow(
+        "Database connection dropped",
+      );
+
+      // Verify that no orphaned files were left in the storage directory
+      if (fs.existsSync(tmpTestDir)) {
+        const remainingFiles = fs.readdirSync(tmpTestDir);
+        expect(remainingFiles.length).toBe(0);
+        fs.rmdirSync(tmpTestDir);
+      }
+    });
   });
 
   describe("Preview Mode Integration", () => {
@@ -82,7 +136,8 @@ describe("Image Storage & Security System (Feature 4)", () => {
 
       const uploadRes = previewRequest("POST", "/api/images", {
         fileName: "screenshot.png",
-        dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        dataUrl:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
       });
 
       expect(uploadRes.status).toBe(201);
