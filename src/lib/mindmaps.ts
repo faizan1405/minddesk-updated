@@ -3,7 +3,16 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { MapDoc } from "@/lib/mindmap-doc";
 
-export type MindMapMeta = { id: string; title: string; is_locked: boolean; node_count: number; version: number; created_at: string; updated_at: string };
+export type MindMapMeta = {
+  id: string;
+  title: string;
+  is_locked: boolean;
+  is_pinned?: boolean | undefined;
+  node_count: number;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
 export type MindMapFull = MindMapMeta & { data: MapDoc };
 
 export const mapsKey = ["mind-maps"] as const;
@@ -38,6 +47,18 @@ export function useMindMapActions() {
         );
       },
       onError: fail("Couldn't update mind map lock"),
+    }),
+    setPinned: useMutation({
+      mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+        api<MindMapMeta>(`/api/mind-maps/${id}`, { method: "PATCH", body: { is_pinned: pinned } }),
+      onSuccess: (meta) => {
+        refresh();
+        qc.setQueryData(["mind-map", meta.id], (old: MindMapFull | undefined) =>
+          old ? { ...old, is_pinned: meta.is_pinned } : old,
+        );
+        toast.success(meta.is_pinned ? "Mind map pinned" : "Mind map unpinned");
+      },
+      onError: fail("Couldn't update mind map pin"),
     }),
     duplicate: useMutation({
       mutationFn: async (id: string) => {

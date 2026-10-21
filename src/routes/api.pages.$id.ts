@@ -23,6 +23,7 @@ export const Route = createFileRoute("/api/pages/$id")({
           title: z.string().max(300).optional(),
           content: ContentSchema.optional(),
           base_version: z.number().int().optional(),
+          is_pinned: z.boolean().optional(),
         });
         return api.handle(async () => {
           const user = await api.requireUser(request);
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/api/pages/$id")({
             const res = await prisma.page.updateMany({
               where: { ...where, version: b.base_version },
               data: api.defined({
-                title: b.title, content: JSON.stringify(b.content), version: { increment: 1 },
+                title: b.title, content: JSON.stringify(b.content), isPinned: b.is_pinned, version: { increment: 1 },
               }),
             });
             if (res.count === 0) {
@@ -42,8 +43,11 @@ export const Route = createFileRoute("/api/pages/$id")({
               if (!exists) throw new api.ApiError(404, "Page not found");
               return api.json({ error: "This page was changed elsewhere.", version: exists.version }, { status: 409 });
             }
-          } else if (b.title !== undefined) {
-            const res = await prisma.page.updateMany({ where, data: { title: b.title } });
+          } else if (b.title !== undefined || b.is_pinned !== undefined) {
+            const res = await prisma.page.updateMany({
+              where,
+              data: api.defined({ title: b.title, isPinned: b.is_pinned }),
+            });
             if (res.count === 0) throw new api.ApiError(404, "Page not found");
           }
           const page = await prisma.page.findFirst({ where, select: api.pageMetaSelect });

@@ -195,15 +195,16 @@ export function defined<T extends object>(o: T) {
 // ---------- notes & projects ----------
 import type { Page as DbPage, Project as DbProject } from "@prisma/client";
 export const projectDto = (p: DbProject) => ({
-  id: p.id, title: p.title, position: p.position,
+  id: p.id, title: p.title, position: p.position, is_pinned: Boolean(p.isPinned),
   created_at: p.createdAt.toISOString(), updated_at: p.updatedAt.toISOString(),
 });
 export const pageMetaDto = (p: Omit<DbPage, "content">) => ({
   id: p.id, project_id: p.projectId, parent_id: p.parentId, title: p.title, position: p.position,
+  is_pinned: Boolean(p.isPinned),
   version: p.version, created_at: p.createdAt.toISOString(), updated_at: p.updatedAt.toISOString(),
 });
 export const pageMetaSelect = {
-  id: true, userId: true, projectId: true, parentId: true, title: true, position: true, version: true,
+  id: true, userId: true, projectId: true, parentId: true, title: true, position: true, isPinned: true, version: true,
   createdAt: true, updatedAt: true, deletedAt: true,
 } as const;
 
@@ -307,10 +308,10 @@ export async function activityData(raw: unknown, userId: string) {
 // ---------- mind maps ----------
 import type { MindMap as DbMap } from "@prisma/client";
 export const mindMapMetaDto = (m: Omit<DbMap, "data">) => ({
-  id: m.id, title: m.title, is_locked: Boolean(m.isLocked), node_count: m.nodeCount, version: m.version,
+  id: m.id, title: m.title, is_locked: Boolean(m.isLocked), is_pinned: Boolean(m.isPinned), node_count: m.nodeCount, version: m.version,
   created_at: m.createdAt.toISOString(), updated_at: m.updatedAt.toISOString(),
 });
-export const mindMapMetaSelect = { id: true, userId: true, title: true, isLocked: true, nodeCount: true, version: true, createdAt: true, updatedAt: true, deletedAt: true } as const;
+export const mindMapMetaSelect = { id: true, userId: true, title: true, isLocked: true, isPinned: true, nodeCount: true, version: true, createdAt: true, updatedAt: true, deletedAt: true } as const;
 
 // ---------- habits & routines ----------
 import type { Habit as DbHabit, Routine as DbRoutine } from "@prisma/client";

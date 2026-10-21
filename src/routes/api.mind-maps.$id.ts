@@ -24,6 +24,7 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
           data: DocSchema.optional(),
           base_version: z.number().int().optional(),
           is_locked: z.boolean().optional(),
+          is_pinned: z.boolean().optional(),
         });
         return api.handle(async () => {
           const user = await api.requireUser(request);
@@ -48,6 +49,7 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
                 data: JSON.stringify(b.data),
                 nodeCount: b.data.nodes.length,
                 isLocked: b.is_locked,
+                isPinned: b.is_pinned,
                 version: { increment: 1 },
               }),
             });
@@ -56,10 +58,10 @@ export const Route = createFileRoute("/api/mind-maps/$id")({
               if (!exists) throw new api.ApiError(404, "Mind map not found");
               return api.json({ error: "This mind map was changed elsewhere.", version: exists.version }, { status: 409 });
             }
-          } else if (b.title !== undefined || b.is_locked !== undefined) {
+          } else if (b.title !== undefined || b.is_locked !== undefined || b.is_pinned !== undefined) {
             const res = await prisma.mindMap.updateMany({
               where,
-              data: api.defined({ title: b.title, isLocked: b.is_locked }),
+              data: api.defined({ title: b.title, isLocked: b.is_locked, isPinned: b.is_pinned }),
             });
             if (res.count === 0) throw new api.ApiError(404, "Mind map not found");
           }

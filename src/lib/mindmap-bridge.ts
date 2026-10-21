@@ -111,6 +111,24 @@ export function mindmapToPageContent(
 
     const isTask = node.icon === "check";
     const codeMatch = node.title.match(/^Code Snippet(?:\s*\(([^)]+)\))?$/);
+    const isImage =
+      node.title.startsWith("📷 ") ||
+      (Boolean(node.link) &&
+        (node.link!.includes("/api/images") ||
+          /\.(png|jpe?g|webp)(\?.*)?$/i.test(node.link!)));
+
+    if (isImage) {
+      const caption = node.title.replace(/^📷\s*/, "").trim() || node.notes?.trim() || undefined;
+      blocks.push({
+        id: newBlockId(),
+        type: "image",
+        url: node.link || undefined,
+        caption: caption || undefined,
+        text: caption || "",
+      });
+      processedCount++;
+      return;
+    }
 
     if (codeMatch && node.notes) {
       blocks.push({
@@ -327,7 +345,7 @@ export function pageContentToMindMap(title: string, content: PageContent): NoteT
     const rawText = b.text ? b.text.trim() : "";
 
     // Ignore empty paragraphs or empty dividers
-    if (!rawText && b.type !== "divider" && b.type !== "code") continue;
+    if (!rawText && b.type !== "divider" && b.type !== "code" && b.type !== "image") continue;
 
     // Reset list stack on non-list blocks
     if (b.type !== "bullet" && b.type !== "number" && b.type !== "check") {
@@ -454,7 +472,24 @@ export function pageContentToMindMap(title: string, content: PageContent): NoteT
       continue;
     }
 
-    // E. Paragraphs
+    // E. Image Block
+    if (b.type === "image") {
+      const parent = currentL3Id ?? currentL2Id ?? currentL1Id ?? rootId;
+      const caption = b.caption || b.text || "Image";
+      const node = bridgeNode({
+        parentId: parent,
+        title: `📷 ${caption}`.slice(0, 200),
+        notes: b.caption || b.text || "",
+        link: b.url || "",
+        size: "s",
+        icon: "none",
+      });
+      nodes.push(node);
+      lastNodeId = node.id;
+      continue;
+    }
+
+    // F. Paragraphs
     if (b.type === "p") {
       // If flat document without any headings
       if (currentL1Id === null && !hasH1 && !hasH2 && !hasH3) {

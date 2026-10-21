@@ -5,7 +5,7 @@ import { displayNameOf, initialsOf } from "@/hooks/use-auth";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   CheckSquare, Star, List, NotebookPen, FolderKanban, CalendarDays, Clock, Network, Repeat,
-  Settings, LogOut, ChevronRight, BarChart3, LayoutTemplate, Trash2,
+  Settings, LogOut, ChevronRight, BarChart3, LayoutTemplate, Trash2, Pin,
 } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useLists } from "@/lib/tasks";
+import { pageTitle, usePages, useProjects } from "@/lib/pages";
+import { useMindMaps } from "@/lib/mindmaps";
 import { Logo } from "./Logo";
 import { CreateMenu } from "./CreateMenu";
 
@@ -35,9 +37,19 @@ export function AppSidebar() {
   const path = useRouterState({ select: (r) => r.location.pathname });
   const { user, signOut } = useAuth();
   const { data: lists } = useLists();
+  const { data: pages } = usePages();
+  const { data: projects } = useProjects();
+  const { data: mindMaps } = useMindMaps();
+
+  const pinnedProjects = (projects || []).filter((p) => p.is_pinned);
+  const pinnedNotes = (pages || []).filter((p) => p.is_pinned);
+  const pinnedMindMaps = (mindMaps || []).filter((m) => m.is_pinned);
+  const totalPinned = pinnedProjects.length + pinnedNotes.length + pinnedMindMaps.length;
+
   const close = () => isMobile && setOpenMobile(false);
   const prefs = useSettings();
   const [tasksOpen, setTasksOpen] = useState(prefs.sidebar_tasks_open);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
   const name = displayNameOf(user);
 
   return (
@@ -51,6 +63,84 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
+        {totalPinned > 0 && (
+          <Collapsible open={pinnedOpen || collapsed} onOpenChange={setPinnedOpen} asChild>
+            <SidebarGroup>
+              <SidebarGroupLabel asChild>
+                <CollapsibleTrigger className="w-full justify-between rounded-md hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <Pin className="h-3.5 w-3.5 rotate-45 text-amber-500 fill-amber-500/20" />
+                    <span>Pinned ({totalPinned})</span>
+                  </span>
+                  <ChevronRight className={`transition-transform duration-200 ${pinnedOpen ? "rotate-90" : ""}`} />
+                </CollapsibleTrigger>
+              </SidebarGroupLabel>
+              <CollapsibleContent>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {pinnedProjects.map((p) => (
+                      <SidebarMenuItem key={`pinned-proj-${p.id}`}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={path === `/projects/${p.id}`}
+                          tooltip={`Project: ${p.title}`}
+                        >
+                          <Link to="/projects/$projectId" params={{ projectId: p.id }} onClick={close}>
+                            <FolderKanban className="text-primary" />
+                            <span className="truncate">{p.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                    {pinnedNotes.map((n) => (
+                      <SidebarMenuItem key={`pinned-note-${n.id}`}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={path.includes(n.id)}
+                          tooltip={`Note: ${pageTitle(n)}`}
+                        >
+                          {n.project_id ? (
+                            <Link
+                              to="/projects/$projectId/$pageId"
+                              params={{ projectId: n.project_id, pageId: n.id }}
+                              onClick={close}
+                            >
+                              <NotebookPen className="text-blue-500" />
+                              <span className="truncate">{pageTitle(n)}</span>
+                            </Link>
+                          ) : (
+                            <Link
+                              to="/notes/$pageId"
+                              params={{ pageId: n.id }}
+                              onClick={close}
+                            >
+                              <NotebookPen className="text-blue-500" />
+                              <span className="truncate">{pageTitle(n)}</span>
+                            </Link>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                    {pinnedMindMaps.map((m) => (
+                      <SidebarMenuItem key={`pinned-map-${m.id}`}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={path === `/mind-maps/${m.id}`}
+                          tooltip={`Mind Map: ${m.title}`}
+                        >
+                          <Link to="/mind-maps/$mapId" params={{ mapId: m.id }} onClick={close}>
+                            <Network className="text-violet-500" />
+                            <span className="truncate">{m.title}</span>
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </CollapsibleContent>
+            </SidebarGroup>
+          </Collapsible>
+        )}
         <Collapsible open={tasksOpen || collapsed} onOpenChange={setTasksOpen} asChild>
         <SidebarGroup>
           <SidebarGroupLabel asChild>

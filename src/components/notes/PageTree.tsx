@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, FileDown, FileText, MoreHorizontal, Plus } from "lucide-react";
+import { ChevronRight, FileDown, FileText, MoreHorizontal, Pin, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ancestors, descendantCount, pageTitle, usePageActions, type PageFull, type PageMeta } from "@/lib/pages";
@@ -56,7 +56,11 @@ export function PageTree({
   const render = (parentId: string | null, depth: number): ReactNode => {
     const kids = pages.filter((p) => p.parent_id === parentId);
     if (!kids.length) return null;
-    return kids.map((p) => (
+    const sortedKids = [...kids].sort((a, b) => {
+      if (Boolean(a.is_pinned) === Boolean(b.is_pinned)) return a.position - b.position;
+      return a.is_pinned ? -1 : 1;
+    });
+    return sortedKids.map((p) => (
       <TreeRow
         key={p.id}
         page={p}
@@ -89,7 +93,7 @@ function TreeRow({
   onToggle: () => void; onAddChild: () => void; onDeleted: (id: string) => void; onNavigate?: (() => void) | undefined;
   descendants: number; children: ReactNode;
 }) {
-  const { renamePage, deletePage } = usePageActions();
+  const { renamePage, deletePage, togglePinPage } = usePageActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -134,6 +138,9 @@ function TreeRow({
           className="flex min-w-0 flex-1 items-center gap-2 py-1">
           <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className={cn("truncate", !page.title.trim() && "text-muted-foreground")}>{pageTitle(page)}</span>
+          {page.is_pinned && (
+            <Pin className="ml-auto mr-1 h-3 w-3 shrink-0 rotate-45 text-amber-500 fill-amber-500/20" />
+          )}
         </PageLink>
         <button type="button" onClick={onAddChild} aria-label="Add subpage" title="Add subpage"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
@@ -147,6 +154,10 @@ function TreeRow({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem onSelect={() => togglePinPage.mutate({ id: page.id, pinned: !page.is_pinned })}>
+              <Pin className="mr-2 h-4 w-4 text-amber-500" />
+              <span>{page.is_pinned ? "Unpin note" : "Pin note"}</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
             <DropdownMenuItem onSelect={onAddChild}>Add subpage</DropdownMenuItem>
             <DropdownMenuSeparator />

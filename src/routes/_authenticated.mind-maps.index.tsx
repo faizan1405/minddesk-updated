@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Lock, LockOpen, MoreHorizontal, Network, Plus, Search, Upload } from "lucide-react";
+import { Lock, LockOpen, MoreHorizontal, Network, Pin, PinOff, Plus, Search, Upload } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,13 @@ function MindMapsHome() {
 
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return (maps.data ?? []).filter((m) => !s || m.title.toLowerCase().includes(s));
+    const list = (maps.data ?? []).filter((m) => !s || m.title.toLowerCase().includes(s));
+    return [...list].sort((a, b) => {
+      const aPin = a.is_pinned ? 1 : 0;
+      const bPin = b.is_pinned ? 1 : 0;
+      if (aPin !== bPin) return bPin - aPin;
+      return 0;
+    });
   }, [maps.data, q]);
 
   const onImport = async (file: File) => {
@@ -150,7 +156,7 @@ function MindMapsHome() {
 }
 
 function MapCard({ map }: { map: MindMapMeta }) {
-  const { rename, duplicate, remove, setLocked } = useMindMapActions();
+  const { rename, duplicate, remove, setLocked, setPinned } = useMindMapActions();
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   return (
@@ -159,6 +165,11 @@ function MapCard({ map }: { map: MindMapMeta }) {
         <Network className="mb-4 h-5 w-5 text-primary" />
         <div className="flex items-center gap-1.5 font-medium">
           <span className="truncate">{map.title}</span>
+          {map.is_pinned && (
+            <span title="Pinned">
+              <Pin className="h-3.5 w-3.5 shrink-0 fill-primary/20 text-primary rotate-45" aria-label="Pinned" />
+            </span>
+          )}
           {map.is_locked && (
             <span title="Locked (read-only)">
               <Lock className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-label="Locked" />
@@ -182,6 +193,11 @@ function MapCard({ map }: { map: MindMapMeta }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setPinned.mutate({ id: map.id, pinned: !map.is_pinned })}>
+            {map.is_pinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
+            <span>{map.is_pinned ? "Unpin mind map" : "Pin mind map"}</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setLocked.mutate({ id: map.id, locked: !map.is_locked })}>
             {map.is_locked ? "Unlock" : "Lock"}
           </DropdownMenuItem>

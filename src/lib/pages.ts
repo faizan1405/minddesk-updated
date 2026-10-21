@@ -3,10 +3,24 @@ import { toast } from "sonner";
 import { api } from "@/lib/api-client";
 import type { PageContent } from "@/lib/page-content";
 
-export type Project = { id: string; title: string; position: number; created_at: string; updated_at: string };
+export type Project = {
+  id: string;
+  title: string;
+  position: number;
+  is_pinned?: boolean | undefined;
+  created_at: string;
+  updated_at: string;
+};
 export type PageMeta = {
-  id: string; project_id: string | null; parent_id: string | null; title: string; position: number;
-  version: number; created_at: string; updated_at: string;
+  id: string;
+  project_id: string | null;
+  parent_id: string | null;
+  title: string;
+  position: number;
+  is_pinned?: boolean | undefined;
+  version: number;
+  created_at: string;
+  updated_at: string;
 };
 export type PageFull = PageMeta & { content: PageContent };
 
@@ -38,8 +52,12 @@ export function usePageActions() {
   const refreshProjects = () => qc.invalidateQueries({ queryKey: projectsKey });
 
   const createPage = useMutation({
-    mutationFn: (input: { parent_id?: string | null; project_id?: string | null; title?: string; content?: PageContent }) =>
-      api<PageMeta>("/api/pages", { method: "POST", body: input }),
+    mutationFn: (input: {
+      parent_id?: string | null;
+      project_id?: string | null;
+      title?: string;
+      content?: PageContent;
+    }) => api<PageMeta>("/api/pages", { method: "POST", body: input }),
     onSuccess: (page) => {
       qc.setQueryData<PageMeta[]>(pagesKey, (old) => (old ? [...old, page] : old));
       refreshPages();
@@ -56,6 +74,17 @@ export function usePageActions() {
     onError: fail("Couldn't rename page"),
   });
 
+  const togglePinPage = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      api<PageMeta>(`/api/pages/${id}`, { method: "PATCH", body: { is_pinned: pinned } }),
+    onSuccess: (page) => {
+      setPagePinInCache(qc, page.id, Boolean(page.is_pinned));
+      refreshPages();
+      toast.success(page.is_pinned ? "Note pinned" : "Note unpinned");
+    },
+    onError: fail("Couldn't update note pin"),
+  });
+
   const deletePage = useMutation({
     mutationFn: (id: string) => api(`/api/pages/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -66,7 +95,8 @@ export function usePageActions() {
   });
 
   const createProject = useMutation({
-    mutationFn: (title: string) => api<Project>("/api/projects", { method: "POST", body: { title } }),
+    mutationFn: (title: string) =>
+      api<Project>("/api/projects", { method: "POST", body: { title } }),
     onSuccess: () => {
       refreshProjects();
       toast.success("Project created");
@@ -81,6 +111,19 @@ export function usePageActions() {
     onError: fail("Couldn't rename project"),
   });
 
+  const togglePinProject = useMutation({
+    mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
+      api<Project>(`/api/projects/${id}`, { method: "PATCH", body: { is_pinned: pinned } }),
+    onSuccess: (proj) => {
+      qc.setQueryData<Project[]>(projectsKey, (old) =>
+        old?.map((p) => (p.id === proj.id ? { ...p, is_pinned: Boolean(proj.is_pinned) } : p)),
+      );
+      refreshProjects();
+      toast.success(proj.is_pinned ? "Project pinned" : "Project unpinned");
+    },
+    onError: fail("Couldn't update project pin"),
+  });
+
   const deleteProject = useMutation({
     mutationFn: (id: string) => api(`/api/projects/${id}`, { method: "DELETE" }),
     onSuccess: () => {
@@ -91,11 +134,37 @@ export function usePageActions() {
     onError: fail("Couldn't delete project"),
   });
 
-  return { createPage, renamePage, deletePage, createProject, renameProject, deleteProject };
+  return {
+    createPage,
+    renamePage,
+    togglePinPage,
+    deletePage,
+    createProject,
+    renameProject,
+    togglePinProject,
+    deleteProject,
+  };
 }
 
-export function setPageTitleInCache(qc: ReturnType<typeof useQueryClient>, id: string, title: string) {
-  qc.setQueryData<PageMeta[]>(pagesKey, (old) => old?.map((p) => (p.id === id ? { ...p, title } : p)));
+export function setPageTitleInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  id: string,
+  title: string,
+) {
+  qc.setQueryData<PageMeta[]>(pagesKey, (old) =>
+    old?.map((p) => (p.id === id ? { ...p, title } : p)),
+  );
+}
+
+export function setPagePinInCache(
+  qc: ReturnType<typeof useQueryClient>,
+  id: string,
+  isPinned: boolean,
+) {
+  qc.setQueryData<PageMeta[]>(pagesKey, (old) =>
+    old?.map((p) => (p.id === id ? { ...p, is_pinned: isPinned } : p)),
+  );
+  qc.setQueryData<PageFull>(pageKey(id), (old) => (old ? { ...old, is_pinned: isPinned } : old));
 }
 
 /** All descendant ids of a page (for "delete" warnings). */

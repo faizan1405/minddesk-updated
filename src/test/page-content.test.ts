@@ -11,7 +11,7 @@ import {
 } from "../lib/page-content";
 
 describe("Page Content Architecture & Compatibility", () => {
-  it("supports all 10 standard Notion-inspired block types", () => {
+  it("supports all standard block types including image blocks", () => {
     expect(BLOCK_TYPES).toEqual([
       "p",
       "h1",
@@ -23,6 +23,7 @@ describe("Page Content Architecture & Compatibility", () => {
       "callout",
       "code",
       "divider",
+      "image",
     ]);
   });
 

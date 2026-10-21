@@ -29,6 +29,7 @@ import { Route as ApiAnalyticsRouteImport } from './routes/api.analytics'
 import { Route as ApiEventsRouteImport } from './routes/api.events'
 import { Route as ApiHabitsRouteImport } from './routes/api.habits'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
+import { Route as ApiImagesRouteImport } from './routes/api.images'
 import { Route as ApiMindMapsRouteImport } from './routes/api.mind-maps'
 import { Route as ApiPagesRouteImport } from './routes/api.pages'
 import { Route as ApiProjectsRouteImport } from './routes/api.projects'
@@ -56,6 +57,7 @@ import { Route as ApiDataSummaryRouteImport } from './routes/api.data.summary'
 import { Route as ApiEventsIdRouteImport } from './routes/api.events.$id'
 import { Route as ApiHabitsIdRouteImport } from './routes/api.habits.$id'
 import { Route as ApiHabitsOrderRouteImport } from './routes/api.habits.order'
+import { Route as ApiImagesIdRouteImport } from './routes/api.images.$id'
 import { Route as ApiMindMapsIdRouteImport } from './routes/api.mind-maps.$id'
 import { Route as ApiPagesIdRouteImport } from './routes/api.pages.$id'
 import { Route as ApiPlanActivitiesRouteImport } from './routes/api.plan.activities'
@@ -174,6 +176,11 @@ const ApiHabitsRoute = ApiHabitsRouteImport.update({
 const ApiHealthRoute = ApiHealthRouteImport.update({
   id: '/api/health',
   path: '/api/health',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiImagesRoute = ApiImagesRouteImport.update({
+  id: '/api/images',
+  path: '/api/images',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiMindMapsRoute = ApiMindMapsRouteImport.update({
@@ -317,6 +324,11 @@ const ApiHabitsOrderRoute = ApiHabitsOrderRouteImport.update({
   path: '/order',
   getParentRoute: () => ApiHabitsRoute,
 } as any)
+const ApiImagesIdRoute = ApiImagesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiImagesRoute,
+} as any)
 const ApiMindMapsIdRoute = ApiMindMapsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -442,6 +454,7 @@ export interface FileRoutesByFullPath {
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
+  '/api/images': typeof ApiImagesRouteWithChildren
   '/api/mind-maps': typeof ApiMindMapsRouteWithChildren
   '/api/pages': typeof ApiPagesRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
@@ -466,6 +479,7 @@ export interface FileRoutesByFullPath {
   '/api/events/$id': typeof ApiEventsIdRoute
   '/api/habits/$id': typeof ApiHabitsIdRouteWithChildren
   '/api/habits/order': typeof ApiHabitsOrderRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/mind-maps/$id': typeof ApiMindMapsIdRoute
   '/api/pages/$id': typeof ApiPagesIdRoute
   '/api/plan/activities': typeof ApiPlanActivitiesRouteWithChildren
@@ -507,6 +521,7 @@ export interface FileRoutesByTo {
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
+  '/api/images': typeof ApiImagesRouteWithChildren
   '/api/mind-maps': typeof ApiMindMapsRouteWithChildren
   '/api/pages': typeof ApiPagesRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
@@ -530,6 +545,7 @@ export interface FileRoutesByTo {
   '/api/events/$id': typeof ApiEventsIdRoute
   '/api/habits/$id': typeof ApiHabitsIdRouteWithChildren
   '/api/habits/order': typeof ApiHabitsOrderRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/mind-maps/$id': typeof ApiMindMapsIdRoute
   '/api/pages/$id': typeof ApiPagesIdRoute
   '/api/plan/activities': typeof ApiPlanActivitiesRouteWithChildren
@@ -576,6 +592,7 @@ export interface FileRoutesById {
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
   '/api/health': typeof ApiHealthRoute
+  '/api/images': typeof ApiImagesRouteWithChildren
   '/api/mind-maps': typeof ApiMindMapsRouteWithChildren
   '/api/pages': typeof ApiPagesRouteWithChildren
   '/api/projects': typeof ApiProjectsRouteWithChildren
@@ -600,6 +617,7 @@ export interface FileRoutesById {
   '/api/events/$id': typeof ApiEventsIdRoute
   '/api/habits/$id': typeof ApiHabitsIdRouteWithChildren
   '/api/habits/order': typeof ApiHabitsOrderRoute
+  '/api/images/$id': typeof ApiImagesIdRoute
   '/api/mind-maps/$id': typeof ApiMindMapsIdRoute
   '/api/pages/$id': typeof ApiPagesIdRoute
   '/api/plan/activities': typeof ApiPlanActivitiesRouteWithChildren
@@ -646,6 +664,7 @@ export interface FileRouteTypes {
     | '/api/events'
     | '/api/habits'
     | '/api/health'
+    | '/api/images'
     | '/api/mind-maps'
     | '/api/pages'
     | '/api/projects'
@@ -670,6 +689,7 @@ export interface FileRouteTypes {
     | '/api/events/$id'
     | '/api/habits/$id'
     | '/api/habits/order'
+    | '/api/images/$id'
     | '/api/mind-maps/$id'
     | '/api/pages/$id'
     | '/api/plan/activities'
@@ -711,6 +731,7 @@ export interface FileRouteTypes {
     | '/api/events'
     | '/api/habits'
     | '/api/health'
+    | '/api/images'
     | '/api/mind-maps'
     | '/api/pages'
     | '/api/projects'
@@ -734,6 +755,7 @@ export interface FileRouteTypes {
     | '/api/events/$id'
     | '/api/habits/$id'
     | '/api/habits/order'
+    | '/api/images/$id'
     | '/api/mind-maps/$id'
     | '/api/pages/$id'
     | '/api/plan/activities'
@@ -779,6 +801,7 @@ export interface FileRouteTypes {
     | '/api/events'
     | '/api/habits'
     | '/api/health'
+    | '/api/images'
     | '/api/mind-maps'
     | '/api/pages'
     | '/api/projects'
@@ -803,6 +826,7 @@ export interface FileRouteTypes {
     | '/api/events/$id'
     | '/api/habits/$id'
     | '/api/habits/order'
+    | '/api/images/$id'
     | '/api/mind-maps/$id'
     | '/api/pages/$id'
     | '/api/plan/activities'
@@ -836,6 +860,7 @@ export interface RootRouteChildren {
   ApiEventsRoute: typeof ApiEventsRouteWithChildren
   ApiHabitsRoute: typeof ApiHabitsRouteWithChildren
   ApiHealthRoute: typeof ApiHealthRoute
+  ApiImagesRoute: typeof ApiImagesRouteWithChildren
   ApiMindMapsRoute: typeof ApiMindMapsRouteWithChildren
   ApiPagesRoute: typeof ApiPagesRouteWithChildren
   ApiProjectsRoute: typeof ApiProjectsRouteWithChildren
@@ -998,6 +1023,13 @@ declare module '@tanstack/react-router' {
       path: '/api/health'
       fullPath: '/api/health'
       preLoaderRoute: typeof ApiHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/images': {
+      id: '/api/images'
+      path: '/api/images'
+      fullPath: '/api/images'
+      preLoaderRoute: typeof ApiImagesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/mind-maps': {
@@ -1188,6 +1220,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/habits/order'
       preLoaderRoute: typeof ApiHabitsOrderRouteImport
       parentRoute: typeof ApiHabitsRoute
+    }
+    '/api/images/$id': {
+      id: '/api/images/$id'
+      path: '/$id'
+      fullPath: '/api/images/$id'
+      preLoaderRoute: typeof ApiImagesIdRouteImport
+      parentRoute: typeof ApiImagesRoute
     }
     '/api/mind-maps/$id': {
       id: '/api/mind-maps/$id'
@@ -1470,6 +1509,18 @@ const ApiHabitsRouteWithChildren = ApiHabitsRoute._addFileChildren(
   ApiHabitsRouteChildren,
 )
 
+interface ApiImagesRouteChildren {
+  ApiImagesIdRoute: typeof ApiImagesIdRoute
+}
+
+const ApiImagesRouteChildren: ApiImagesRouteChildren = {
+  ApiImagesIdRoute: ApiImagesIdRoute,
+}
+
+const ApiImagesRouteWithChildren = ApiImagesRoute._addFileChildren(
+  ApiImagesRouteChildren,
+)
+
 interface ApiMindMapsRouteChildren {
   ApiMindMapsIdRoute: typeof ApiMindMapsIdRoute
 }
@@ -1604,6 +1655,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiEventsRoute: ApiEventsRouteWithChildren,
   ApiHabitsRoute: ApiHabitsRouteWithChildren,
   ApiHealthRoute: ApiHealthRoute,
+  ApiImagesRoute: ApiImagesRouteWithChildren,
   ApiMindMapsRoute: ApiMindMapsRouteWithChildren,
   ApiPagesRoute: ApiPagesRouteWithChildren,
   ApiProjectsRoute: ApiProjectsRouteWithChildren,

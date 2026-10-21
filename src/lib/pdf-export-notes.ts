@@ -387,6 +387,56 @@ export function buildNotePdfDocDefinition(note: { title: string; blocks: Block[]
         layout: "noBorders",
         margin: [0, 2, 0, 3],
       });
+    } else if (block.type === "image") {
+      const captionText = block.caption || block.text || "";
+      if (block.url && (block.url.startsWith("data:image/") || block.url.startsWith("http"))) {
+        try {
+          content.push({
+            image: block.url,
+            fit: [450, 280],
+            alignment: "center",
+            margin: [0, 8, 0, captionText ? 4 : 8],
+          });
+          if (captionText) {
+            content.push({
+              text: captionText,
+              fontSize: 9.5,
+              italics: true,
+              color: "#64748b",
+              alignment: "center",
+              margin: [0, 0, 0, 8],
+            });
+          }
+        } catch {
+          // Fallback if image rendering fails
+        }
+      } else {
+        content.push({
+          table: {
+            widths: ["*"],
+            body: [
+              [
+                {
+                  text: captionText ? `[Image: ${captionText}]` : "[Image attachment]",
+                  fontSize: 10,
+                  italics: true,
+                  color: "#64748b",
+                  alignment: "center",
+                  fillColor: "#f8fafc",
+                  margin: [8, 12, 8, 12],
+                },
+              ],
+            ],
+          },
+          layout: {
+            hLineWidth: () => 1,
+            vLineWidth: () => 1,
+            hLineColor: () => "#e2e8f0",
+            vLineColor: () => "#e2e8f0",
+          },
+          margin: [0, 6, 0, 6],
+        });
+      }
     }
   }
 
@@ -453,7 +503,35 @@ export function buildNotePdfDocDefinition(note: { title: string; blocks: Block[]
  */
 export async function exportNoteToPdf(note: { title: string; blocks: Block[] }): Promise<void> {
   const pdfMake = await getPdfMake();
-  const docDefinition = buildNotePdfDocDefinition(note);
+
+  // Prefetch relative authenticated images into data URLs so pdfmake renders them smoothly
+  const resolvedBlocks = await Promise.all(
+    note.blocks.map(async (b) => {
+      if (b.type === "image" && b.url && b.url.startsWith("/api/images")) {
+        try {
+          const res = await fetch(b.url, { credentials: "include" });
+          if (res.ok) {
+            const blob = await res.blob();
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            return { ...b, url: dataUrl };
+          }
+        } catch {
+          // ignore network failure and proceed with fallback
+        }
+      }
+      return b;
+    }),
+  );
+
+  const docDefinition = buildNotePdfDocDefinition({
+    title: note.title,
+    blocks: resolvedBlocks,
+  });
 
   return new Promise((resolve, reject) => {
     try {

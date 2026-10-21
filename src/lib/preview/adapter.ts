@@ -60,6 +60,7 @@ function loadSessionDb(): Partial<typeof db> | null {
       ...parsed,
       pageContent: new Map(parsed.pageContent || []),
       mapData: new Map(parsed.mapData || []),
+      images: new Map(parsed.images || []),
     };
   } catch {
     return null;
@@ -73,6 +74,7 @@ function saveSessionDb() {
       ...db,
       pageContent: Array.from(db.pageContent.entries()),
       mapData: Array.from(db.mapData.entries()),
+      images: Array.from(db.images.entries()),
     };
     window.sessionStorage.setItem("md_preview_db", JSON.stringify(serializable));
   } catch {
@@ -103,6 +105,7 @@ const db = {
   mapData: new Map<string, unknown>(),
   habits: [] as Row[],
   routines: [] as Row[],
+  images: new Map<string, unknown>(),
 };
 
 const restored = loadSessionDb();
@@ -353,6 +356,7 @@ function handlePreviewRequest(
         id: uid(),
         title: String(b["title"]).trim(),
         position: Date.now(),
+        is_pinned: false,
         created_at: now(),
         updated_at: now(),
       };
@@ -362,7 +366,10 @@ function handlePreviewRequest(
     case "PATCH /projects/:x": {
       const r = find(db.projects, id);
       if (!r) return err(404, "Project not found");
-      return ok(touch(r, { title: b["title"] }));
+      const patchData: Record<string, unknown> = {};
+      if (b["title"] !== undefined) patchData["title"] = b["title"];
+      if (b["is_pinned"] !== undefined) patchData["is_pinned"] = Boolean(b["is_pinned"]);
+      return ok(touch(r, patchData));
     }
     case "DELETE /projects/:x":
       if (!find(db.projects, id)) return err(404, "Project not found");
@@ -386,6 +393,7 @@ function handlePreviewRequest(
         parent_id: b["parent_id"] ?? null,
         title: String(b["title"] ?? "").trim(),
         position: Date.now(),
+        is_pinned: false,
         version: 1,
         created_at: now(),
         updated_at: now(),
@@ -411,7 +419,10 @@ function handlePreviewRequest(
         db.pageContent.set(id, b["content"]);
         r["version"] = (r["version"] as number) + 1;
       }
-      return ok(touch(r, { title: b["title"] }));
+      const patchData: Record<string, unknown> = {};
+      if (b["title"] !== undefined) patchData["title"] = b["title"];
+      if (b["is_pinned"] !== undefined) patchData["is_pinned"] = Boolean(b["is_pinned"]);
+      return ok(touch(r, patchData));
     }
     case "DELETE /pages/:x": {
       if (!find(db.pages, id)) return err(404, "Page not found");
@@ -585,6 +596,7 @@ function handlePreviewRequest(
         id: uid(),
         title,
         node_count: parsed.data.nodes.length,
+        is_pinned: false,
         version: 1,
         created_at: now(),
         updated_at: now(),
@@ -613,9 +625,49 @@ function handlePreviewRequest(
         db.mapData.set(mid, parsed.data);
         touch(m, { version: (m["version"] as number) + 1, node_count: parsed.data.nodes.length });
       }
-      if (typeof b["title"] === "string" && b["title"].trim())
-        touch(m, { title: b["title"].trim() });
+      const patchData: Record<string, unknown> = {};
+      if (typeof b["title"] === "string" && (b["title"] as string).trim())
+        patchData["title"] = (b["title"] as string).trim();
+      if (b["is_pinned"] !== undefined) patchData["is_pinned"] = Boolean(b["is_pinned"]);
+      if (b["is_locked"] !== undefined) patchData["is_locked"] = Boolean(b["is_locked"]);
+      if (Object.keys(patchData).length > 0) touch(m, patchData);
       return ok(meta(m));
+    }
+  }
+
+  // ---- images ----
+  if (p[1] === "images") {
+    const imgId = p[2] ?? "";
+    if (!imgId && method === "POST") {
+      const id = uid();
+      let fileName = "screenshot.png";
+      let mimeType = "image/png";
+      let dataUrl = "";
+      let fileSize = 1024;
+      if (b && typeof b === "object") {
+        const bodyObj = b as Record<string, unknown>;
+        if (typeof bodyObj["fileName"] === "string") fileName = bodyObj["fileName"];
+        if (typeof bodyObj["mimeType"] === "string") mimeType = bodyObj["mimeType"];
+        if (typeof bodyObj["dataUrl"] === "string") dataUrl = bodyObj["dataUrl"];
+        if (typeof bodyObj["fileSize"] === "number") fileSize = bodyObj["fileSize"];
+      }
+      db.images.set(id, { dataUrl, mimeType, fileName, fileSize });
+      saveSessionDb();
+      return ok(
+        {
+          id,
+          url: dataUrl || `/api/images/${id}`,
+          fileName,
+          fileSize,
+          mimeType,
+        },
+        201,
+      );
+    }
+    if (imgId && method === "GET") {
+      const img = db.images.get(imgId);
+      if (!img) return err(404, "Image not found");
+      return ok({ id: imgId, ...img });
     }
   }
 

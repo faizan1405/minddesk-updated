@@ -45,7 +45,7 @@ function CalendarPage() {
   const view: View = search.view ?? "month";
   const cursor = search.date ?? todayKey(tz);
   const go = (next: { view?: View; date?: string }) =>
-    navigate({ search: (p) => ({ ...p, ...next }), replace: true });
+    navigate({ search: (p: Record<string, unknown>) => ({ ...p, ...next }), replace: true });
 
   const weekDays = isMobile ? 3 : 7;
   const range = useMemo(() => {

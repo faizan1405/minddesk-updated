@@ -1,41 +1,119 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, FileDown, Loader2, Network } from "lucide-react";
+import { AlertCircle, Check, FileDown, Loader2, Network, Pin } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiRequestError } from "@/lib/api-client";
-import { setPageTitleInCache, usePage, type PageFull, type PageMeta } from "@/lib/pages";
+import {
+  setPageTitleInCache,
+  usePage,
+  usePageActions,
+  type PageFull,
+  type PageMeta,
+} from "@/lib/pages";
 import type { Block } from "@/lib/page-content";
 import type { MindMapMeta } from "@/lib/mindmaps";
 import { pageContentToMindMap } from "@/lib/mindmap-bridge";
 import { exportNoteToPdf } from "@/lib/pdf-export-notes";
-import { BlockEditor } from "./BlockEditor";
+import { NotesHistoryManager } from "@/lib/notes-history";
+import { BlockEditor, type FocusTarget } from "./BlockEditor";
 import { ErrorState, LoadingState } from "@/components/app/PageStates";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type Status = "saved" | "dirty" | "saving" | "error" | "conflict";
 const DEBOUNCE_MS = 800;
 
 export function PageEditor({ pageId }: { pageId: string }) {
+  const [reloadCounter, setReloadCounter] = useState(0);
+  const [isReloading, setIsReloading] = useState(false);
   const q = usePage(pageId);
-  if (q.isPending) return <LoadingState />;
-  if (q.error) return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
-  // Remount per page/version so local editing state never leaks between pages.
+  const lastReportedErrorRef = useRef<unknown>(null);
+
+  const handleReload = useCallback(async () => {
+    if (isReloading) return;
+    setIsReloading(true);
+    try {
+      const res = await q.refetch();
+      if (res.isSuccess && res.data) {
+        setReloadCounter((c) => c + 1);
+        toast.success("Loaded latest version");
+      } else if (res.error) {
+        lastReportedErrorRef.current = res.error;
+        toast.error(`Could not reload latest version: ${res.error.message}`);
+      }
+    } catch (err) {
+      lastReportedErrorRef.current = err;
+      const msg = err instanceof Error ? err.message : "Failed to reload";
+      toast.error(`Could not reload latest version: ${msg}`);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [isReloading, q]);
+
+  useEffect(() => {
+    if (q.error && q.data && q.error !== lastReportedErrorRef.current) {
+      lastReportedErrorRef.current = q.error;
+      toast.error(`Failed to refresh note: ${q.error.message}`);
+    } else if (!q.error) {
+      lastReportedErrorRef.current = null;
+    }
+  }, [q.error, q.data]);
+
+  // Only show full ErrorState or LoadingState when there is no usable cached note data
+  if (q.isPending && !q.data) return <LoadingState />;
+  if (q.error && !q.data)
+    return <ErrorState message={q.error.message} onRetry={() => q.refetch()} />;
+  if (!q.data) return <LoadingState />;
+
+  // Remount per pageId or explicit user reload, but never on metadata query updates like pin/unpin
   return (
     <LoadedEditor
-      key={`${q.data.id}:${q.dataUpdatedAt}`}
+      key={`${pageId}:${reloadCounter}`}
       page={q.data}
-      onReload={() => q.refetch()}
+      onReload={handleReload}
+      isReloading={isReloading}
     />
   );
 }
 
-function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void }) {
+function LoadedEditor({
+  page,
+  onReload,
+  isReloading,
+}: {
+  page: PageFull;
+  onReload: () => void | Promise<void>;
+  isReloading?: boolean;
+}) {
   const qc = useQueryClient();
+  const { togglePinPage } = usePageActions();
+
+  const [isPinned, setIsPinned] = useState(Boolean(page.is_pinned));
+  useEffect(() => {
+    setIsPinned(Boolean(page.is_pinned));
+  }, [page.is_pinned]);
+
   const [title, setTitle] = useState(page.title);
   const [blocks, setBlocks] = useState<Block[]>(page.content.blocks);
   const [status, setStatus] = useState<Status>("saved");
   const [focusFirst, setFocusFirst] = useState(0);
+
+  // Undo / Redo history manager (minimum 100 steps, default 150)
+  const historyRef = useRef<NotesHistoryManager>(
+    new NotesHistoryManager({ title: page.title, blocks: page.content.blocks }),
+  );
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const [pendingFocusExternal, setPendingFocusExternal] = useState<FocusTarget | null>(null);
+
+  const titleRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  const syncHistoryState = useCallback(() => {
+    setCanUndo(historyRef.current.canUndo());
+    setCanRedo(historyRef.current.canRedo());
+  }, []);
 
   // Latest state lives in refs so the save loop always sends the newest edit,
   // and only one request is in flight at a time (no out-of-order overwrites).
@@ -93,19 +171,146 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
     timer.current = setTimeout(() => void flush(), DEBOUNCE_MS);
   }, [flush]);
 
-  function edit(next: { title?: string; blocks?: Block[] }) {
-    latest.current = { ...latest.current, ...next };
+  function edit(
+    next: { title?: string; blocks?: Block[] | ((prev: Block[]) => Block[]) },
+    isTyping = false,
+    cursor?: FocusTarget,
+  ) {
+    const nextTitle = next.title !== undefined ? next.title : latest.current.title;
+    const nextBlocks =
+      typeof next.blocks === "function"
+        ? next.blocks(latest.current.blocks)
+        : next.blocks !== undefined
+          ? next.blocks
+          : latest.current.blocks;
+    const nextDoc = { title: nextTitle, blocks: nextBlocks };
+
+    latest.current = nextDoc;
     if (next.title !== undefined) {
       setTitle(next.title);
       setPageTitleInCache(qc, page.id, next.title);
     }
-    if (next.blocks) setBlocks(next.blocks);
+    if (next.blocks !== undefined) {
+      setBlocks(nextBlocks);
+    }
+
+    const typingKey = isTyping
+      ? cursor?.isTitle
+        ? "typing:title"
+        : cursor?.id
+          ? `typing:${cursor.id}`
+          : "typing"
+      : undefined;
+
+    historyRef.current.commit(nextDoc, {
+      key: typingKey,
+      cursor: cursor ?? undefined,
+    });
+    syncHistoryState();
+
     dirty.current = true;
     if (!blocked.current) {
       setStatus("dirty");
       schedule();
     }
   }
+
+  const getActiveCursor = useCallback((): FocusTarget | null => {
+    if (document.activeElement === titleRef.current && titleRef.current) {
+      return {
+        isTitle: true,
+        pos: titleRef.current.selectionStart,
+        endPos: titleRef.current.selectionEnd,
+      };
+    }
+    return null;
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const activeCur = getActiveCursor();
+    if (activeCur) {
+      historyRef.current.setCursor(activeCur);
+    }
+    const res = historyRef.current.undo();
+    if (!res) return;
+
+    const { doc, cursor } = res;
+    latest.current = doc;
+    setTitle(doc.title);
+    setBlocks(doc.blocks);
+    setPageTitleInCache(qc, page.id, doc.title);
+
+    dirty.current = true;
+    if (!blocked.current) {
+      setStatus("dirty");
+      schedule();
+    }
+    syncHistoryState();
+
+    if (cursor) {
+      if (cursor.isTitle && titleRef.current) {
+        titleRef.current.focus();
+        titleRef.current.setSelectionRange(cursor.pos, cursor.endPos ?? cursor.pos);
+      } else if (cursor.id) {
+        setPendingFocusExternal({ id: cursor.id, pos: cursor.pos, endPos: cursor.endPos });
+      }
+    }
+  }, [getActiveCursor, page.id, qc, schedule, syncHistoryState]);
+
+  const handleRedo = useCallback(() => {
+    const res = historyRef.current.redo();
+    if (!res) return;
+
+    const { doc, cursor } = res;
+    latest.current = doc;
+    setTitle(doc.title);
+    setBlocks(doc.blocks);
+    setPageTitleInCache(qc, page.id, doc.title);
+
+    dirty.current = true;
+    if (!blocked.current) {
+      setStatus("dirty");
+      schedule();
+    }
+    syncHistoryState();
+
+    if (cursor) {
+      if (cursor.isTitle && titleRef.current) {
+        titleRef.current.focus();
+        titleRef.current.setSelectionRange(cursor.pos, cursor.endPos ?? cursor.pos);
+      } else if (cursor.id) {
+        setPendingFocusExternal({ id: cursor.id, pos: cursor.pos, endPos: cursor.endPos });
+      }
+    }
+  }, [page.id, qc, schedule, syncHistoryState]);
+
+  // Keyboard shortcut listener scoped to the editor container
+  useEffect(() => {
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      const active = document.activeElement;
+      if (!editorContainerRef.current?.contains(active)) return;
+
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod || e.altKey) return;
+
+      if (e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if (e.key.toLowerCase() === "y" && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleUndo, handleRedo]);
 
   // Save pending changes when leaving the page or the tab.
   useEffect(() => {
@@ -178,9 +383,47 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
   }, [isExporting]);
 
   return (
-    <div className="mx-auto w-full max-w-[720px] px-5 pb-32 pt-6 md:px-10 md:pt-10">
+    <div
+      ref={editorContainerRef}
+      className="mx-auto w-full max-w-[720px] px-5 pb-32 pt-6 md:px-10 md:pt-10"
+    >
       <div className="mb-3 flex h-8 items-center justify-between">
         <div className="flex items-center gap-2">
+          {/* Pin / Unpin button in opened note header */}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const nextPinned = !isPinned;
+              setIsPinned(nextPinned);
+              togglePinPage.mutate(
+                { id: page.id, pinned: nextPinned },
+                {
+                  onError: () => {
+                    setIsPinned(!nextPinned);
+                  },
+                },
+              );
+            }}
+            className={cn(
+              "h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium shadow-none transition-all hover:bg-accent active:scale-95",
+              isPinned
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground",
+            )}
+            title={isPinned ? "Unpin note" : "Pin note"}
+            aria-label={isPinned ? "Unpin note" : "Pin note"}
+          >
+            <Pin
+              className={cn(
+                "h-3.5 w-3.5",
+                isPinned ? "rotate-45 fill-amber-500/30 text-amber-500" : "text-muted-foreground",
+              )}
+            />
+            <span>{isPinned ? "Pinned" : "Pin"}</span>
+          </Button>
+
           <Button
             type="button"
             variant="outline"
@@ -230,38 +473,59 @@ function LoadedEditor({ page, onReload }: { page: PageFull; onReload: () => void
           <span className="flex-1">
             This page was changed on another device. Your latest edits here were not saved.
           </span>
-          <Button size="sm" variant="outline" onClick={onReload}>
-            Load latest version
+          <Button size="sm" variant="outline" onClick={onReload} disabled={isReloading}>
+            {isReloading ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin text-primary" />
+                Loading…
+              </>
+            ) : (
+              "Load latest version"
+            )}
           </Button>
         </div>
       )}
       <textarea
+        ref={(el) => {
+          titleRef.current = el;
+          if (el) {
+            el.style.height = "0px";
+            el.style.height = `${el.scrollHeight}px`;
+          }
+        }}
         value={title}
         rows={1}
         maxLength={300}
         placeholder="Untitled"
         aria-label="Page title"
-        onChange={(e) => edit({ title: e.target.value.replace(/\n/g, "") })}
+        onChange={(e) => {
+          const val = e.target.value.replace(/\n/g, "");
+          const cursor: FocusTarget = {
+            isTitle: true,
+            pos: e.target.selectionStart,
+            endPos: e.target.selectionEnd,
+          };
+          edit({ title: val }, true, cursor);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
             setFocusFirst((n) => n + 1);
           }
         }}
-        ref={(el) => {
-          if (el) {
-            el.style.height = "0px";
-            el.style.height = `${el.scrollHeight}px`;
-          }
-        }}
         className="mb-4 block w-full resize-none overflow-hidden bg-transparent text-3xl font-semibold leading-tight tracking-tight outline-none placeholder:text-muted-foreground/50 md:text-4xl"
       />
       <BlockEditor
         blocks={blocks}
-        onChange={(b) => edit({ blocks: b })}
+        onChange={(b, isTyping, cursor) => edit({ blocks: b }, isTyping, cursor ?? undefined)}
         focusFirstSignal={focusFirst}
         onExportPdf={handleExportPdf}
         isExporting={isExporting}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        pendingFocusExternal={pendingFocusExternal}
       />
     </div>
   );
