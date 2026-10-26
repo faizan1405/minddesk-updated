@@ -2,7 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   CheckCircle2, Repeat, NotebookPen, LayoutGrid, FolderKanban, CalendarDays, Clock, Network,
-  Settings, UserRound, BarChart3, LayoutTemplate, Trash2, Pin, type LucideIcon,
+  Settings, UserRound, BarChart3, LayoutTemplate, Trash2, Pin, ShieldCheck, type LucideIcon,
 } from "lucide-react";
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from "@/components/ui/drawer";
 import { pageTitle, usePages, useProjects } from "@/lib/pages";
@@ -20,7 +20,8 @@ export function navGroupFor(path: string): NavGroup {
   return "more";
 }
 
-const moreItems: { title: string; url: "/projects" | "/calendar" | "/plan" | "/mind-maps" | "/analytics" | "/templates" | "/trash" | "/settings" | "/profile"; icon: LucideIcon }[] = [
+const moreItems: { title: string; url: "/vault" | "/projects" | "/calendar" | "/plan" | "/mind-maps" | "/analytics" | "/templates" | "/trash" | "/settings" | "/profile"; icon: LucideIcon }[] = [
+  { title: "My Private Vault", url: "/vault", icon: ShieldCheck },
   { title: "Analytics", url: "/analytics", icon: BarChart3 },
   { title: "Templates", url: "/templates", icon: LayoutTemplate },
   { title: "Projects", url: "/projects", icon: FolderKanban },

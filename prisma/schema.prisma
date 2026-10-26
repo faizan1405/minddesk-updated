@@ -31,6 +31,10 @@ model User {
   routines       Routine[]
   habitCompletions HabitCompletion[]
   noteImages   NoteImage[]
+  vaultMeta    VaultMeta?
+  vaultEntries VaultEntry[]
+  vaultDocuments VaultDocument[]
+  vaultAttachments VaultDocumentAttachment[]
   settings     UserSettings?
 
   @@map("users")
@@ -342,4 +346,70 @@ model NoteImage {
 
   @@index([userId])
   @@map("note_images")
+}
+
+
+/// Vault cryptographic metadata (one row per user)
+model VaultMeta {
+  userId        String   @id @map("user_id") @db.Char(36)
+  salt          String   @db.VarChar(64)
+  iterations    Int      @default(3)
+  memoryCost    Int      @default(19456) @map("memory_cost")
+  parallelism   Int      @default(1)
+  wrappedKey    String   @map("wrapped_key") @db.Text
+  wrappedKeyIv  String   @map("wrapped_key_iv") @db.VarChar(64)
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("vault_meta")
+}
+
+/// Passwords & credentials (client-encrypted)
+model VaultEntry {
+  id            String   @id @default(uuid()) @db.Char(36)
+  userId        String   @map("user_id") @db.Char(36)
+  encryptedData String   @map("encrypted_data") @db.LongText
+  iv            String   @db.VarChar(64)
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@map("vault_entries")
+}
+
+/// Documents metadata & private notes (client-encrypted)
+model VaultDocument {
+  id            String   @id @default(uuid()) @db.Char(36)
+  userId        String   @map("user_id") @db.Char(36)
+  encryptedData String   @map("encrypted_data") @db.LongText
+  iv            String   @db.VarChar(64)
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attachments   VaultDocumentAttachment[]
+
+  @@index([userId, updatedAt])
+  @@map("vault_documents")
+}
+
+/// Encrypted document attachments stored in private Hostinger server storage
+model VaultDocumentAttachment {
+  id            String        @id @default(uuid()) @db.Char(36)
+  documentId    String        @map("document_id") @db.Char(36)
+  userId        String        @map("user_id") @db.Char(36)
+  storageKey    String        @map("storage_key") @db.VarChar(255)
+  encryptedSize Int           @map("encrypted_size")
+  iv            String        @db.VarChar(64)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  document      VaultDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@index([userId])
+  @@map("vault_document_attachments")
 }

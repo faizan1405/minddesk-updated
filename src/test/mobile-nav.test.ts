@@ -13,6 +13,7 @@ describe("mobile bottom nav grouping", () => {
   });
   it("everything else, including settings and profile, is More", () => {
     for (const p of [
+      "/vault",
       "/projects/x/y",
       "/calendar",
       "/plan",
