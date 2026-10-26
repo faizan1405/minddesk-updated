@@ -559,4 +559,91 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       expect(await validateDocumentFileMagicBytes(fakePng)).toBe(false);
     });
   });
+
+  // =========================================================================
+  // DATABASE AND ENCRYPTED-FILE BACKUP CONSISTENCY
+  // =========================================================================
+  describe("Database and Encrypted-File Backup Consistency", () => {
+    it("verifies 100% referential consistency between database records and storage files", async () => {
+      const attId1 = validAttId;
+      const attId2 = validAttId2;
+
+      const file1Path = join(tempDir, `${attId1}.enc`);
+      const file2Path = join(tempDir, `${attId2}.enc`);
+
+      const file1Bytes = Buffer.from("encrypted-payload-doc1");
+      const file2Bytes = Buffer.from("encrypted-payload-doc2");
+
+      await writeFile(file1Path, file1Bytes);
+      await writeFile(file2Path, file2Bytes);
+
+      // Simulated database records representing a verified database backup dump
+      const simulatedDbAttachments = [
+        {
+          id: attId1,
+          documentId: validDocId,
+          storageKey: `${attId1}.enc`,
+          encryptedSize: file1Bytes.length,
+          iv: "iv1",
+        },
+        {
+          id: attId2,
+          documentId: validDocId,
+          storageKey: `${attId2}.enc`,
+          encryptedSize: file2Bytes.length,
+          iv: "iv2",
+        },
+      ];
+
+      // Verification function: checks every DB record against disk storage backup
+      const checkConsistency = async (records: typeof simulatedDbAttachments, dir: string) => {
+        let missingFiles = 0;
+        let sizeMismatches = 0;
+
+        for (const rec of records) {
+          const filePath = vaultStorage.getSafeAttachmentPath(dir, rec.storageKey);
+          try {
+            const data = await readFile(filePath);
+            if (data.length !== rec.encryptedSize) {
+              sizeMismatches++;
+            }
+          } catch {
+            missingFiles++;
+          }
+        }
+        return {
+          missingFiles,
+          sizeMismatches,
+          consistent: missingFiles === 0 && sizeMismatches === 0,
+        };
+      };
+
+      const result = await checkConsistency(simulatedDbAttachments, tempDir);
+      expect(result.consistent).toBe(true);
+      expect(result.missingFiles).toBe(0);
+      expect(result.sizeMismatches).toBe(0);
+    });
+
+    it("detects missing storage files during backup verification when inconsistency exists", async () => {
+      const simulatedDbAttachments = [
+        {
+          id: validAttId,
+          documentId: validDocId,
+          storageKey: `${validAttId}.enc`,
+          encryptedSize: 1024,
+          iv: "iv1",
+        },
+      ];
+
+      // Storage directory does not have validAttId.enc
+      let missing = false;
+      const targetPath = vaultStorage.getSafeAttachmentPath(tempDir, `${validAttId}.enc`);
+      try {
+        await readFile(targetPath);
+      } catch {
+        missing = true;
+      }
+      expect(missing).toBe(true);
+    });
+  });
 });

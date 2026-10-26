@@ -801,34 +801,31 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           if (isAmbiguousNetworkError(commitErr)) {
             try {
               const serverDoc = await getVaultDocumentApi(docId);
+              // Require exact verification of the intended commit (ciphertext and IV):
               if (
-                serverDoc.version > createdDoc.version ||
-                serverDoc.encrypted_data === finalEncrypted.ciphertext
+                serverDoc.encrypted_data === finalEncrypted.ciphertext &&
+                serverDoc.iv === finalEncrypted.iv
               ) {
-                // Succeeded on server despite lost response!
+                // Exact intended commit verified on server despite lost response!
                 updated = serverDoc;
               } else {
-                // Server confirmed document was NOT updated to final manifest. Safe to roll back.
-                for (const attId of uploadedAttIds) {
-                  try {
-                    await deleteVaultAttachmentApi(attId);
-                  } catch {
-                    // Best-effort
-                  }
-                }
-                try {
-                  await deleteVaultDocumentApi(docId);
-                } catch {
-                  // Best-effort
-                }
+                // Inconclusive or differing ciphertext/version.
+                // NEVER perform destructive rollback! Preserve files and document record safely.
+                console.warn(
+                  "[vault] Document creation commit unconfirmed or differs. Preserving files without rollback.",
+                  { serverDocVersion: serverDoc.version },
+                );
+                toast.error(
+                  "Document creation status is unconfirmed due to network interruption. Your files and record have been safely preserved on the server. Please reload to verify.",
+                );
                 throw new Error(
-                  "Network connection dropped while saving document manifest. Operation safely rolled back.",
+                  "NETWORK_AMBIGUOUS_COMMIT: Document creation status could not be verified due to network interruption. Files and record have been safely preserved.",
                 );
               }
             } catch (recoveryErr) {
               if (
                 recoveryErr instanceof Error &&
-                recoveryErr.message.includes("safely rolled back")
+                recoveryErr.message.includes("NETWORK_AMBIGUOUS_COMMIT")
               ) {
                 throw recoveryErr;
               }
@@ -978,40 +975,31 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         if (isAmbiguousNetworkError(commitErr)) {
           try {
             const serverDoc = await getVaultDocumentApi(id);
+            // Require exact verification of the intended commit (ciphertext and IV):
             if (
-              serverDoc.version > currentExpectedVersion &&
-              serverDoc.encrypted_data === encrypted.ciphertext
+              serverDoc.encrypted_data === encrypted.ciphertext &&
+              serverDoc.iv === encrypted.iv
             ) {
-              // The commit SUCCEEDED on the server despite the lost HTTP response!
+              // The exact intended commit SUCCEEDED on the server despite the lost HTTP response!
               updated = serverDoc;
-            } else if (serverDoc.version > currentExpectedVersion) {
-              // Another device committed changes concurrently!
-              for (const attId of newlyUploadedAttIds) {
-                try {
-                  await deleteVaultAttachmentApi(attId);
-                } catch {
-                  // Best-effort rollback
-                }
-              }
-              toast.error("Conflict: Document was modified by another session. Please reload.");
-              throw new Error("Conflict: Document was modified by another session. Please reload.");
             } else {
-              // Version did not advance: metadata commit did NOT occur on the server.
-              // Safe to clean up newly uploaded attachments. Existing attachments were never touched!
-              for (const attId of newlyUploadedAttIds) {
-                try {
-                  await deleteVaultAttachmentApi(attId);
-                } catch {
-                  // Best-effort rollback
-                }
-              }
+              // Either another device committed (version > expectedVersion with different ciphertext)
+              // or the delayed PATCH is still in-flight on the server.
+              // In ALL ambiguous cases, NEVER delete newly uploaded or existing attachments!
+              console.warn(
+                "[vault] Document update commit outcome ambiguous or modified concurrently. Preserving all files without rollback.",
+                { serverDocVersion: serverDoc.version },
+              );
+              toast.error(
+                "Document update status is unconfirmed or was modified concurrently. Your uploaded attachments have been safely preserved. Please reload to inspect the current document state.",
+              );
               throw new Error(
-                "Network connection dropped before changes were committed. Please retry.",
+                "AMBIGUOUS_OR_CONCURRENT_EDIT: Document status could not be verified or was modified concurrently. Files have been preserved.",
               );
             }
           } catch (recoveryErr) {
             const recMsg = recoveryErr instanceof Error ? recoveryErr.message : "";
-            if (recMsg.includes("Conflict") || recMsg.includes("dropped before changes")) {
+            if (recMsg.includes("AMBIGUOUS_OR_CONCURRENT_EDIT")) {
               throw recoveryErr;
             }
             // Recovery query itself could NOT reach server (e.g. offline / DNS failure)
@@ -1029,13 +1017,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           }
         } else {
           // Confirmed rejection by server (e.g. 409 Conflict, 400 Bad Request)
-          for (const attId of newlyUploadedAttIds) {
-            try {
-              await deleteVaultAttachmentApi(attId);
-            } catch {
-              // Best-effort rollback
-            }
-          }
+          // Do NOT destroy newly uploaded attachments because another device or delayed retry may reference them.
           const errorObj = commitErr as { status?: number; message?: string };
           if (
             errorObj?.status === 409 ||
