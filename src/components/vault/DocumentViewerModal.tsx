@@ -35,7 +35,11 @@ interface DocumentViewerModalProps {
   document: DecryptedDocumentItem | null;
 }
 
-export function DocumentViewerModal({ open, onOpenChange, document: doc }: DocumentViewerModalProps) {
+export function DocumentViewerModal({
+  open,
+  onOpenChange,
+  document: doc,
+}: DocumentViewerModalProps) {
   const { user } = useAuth();
   const { getAttachmentCryptoKey } = useVault();
 
@@ -109,7 +113,7 @@ export function DocumentViewerModal({ open, onOpenChange, document: doc }: Docum
         const url = URL.createObjectURL(blob);
         activeBlobUrlRef.current = url;
         setBlobUrl(url);
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("[vault-viewer] Decryption failed:", err);
         if (!cancelled) {
           toast.error("Failed to decrypt document attachment.");
@@ -190,7 +194,9 @@ export function DocumentViewerModal({ open, onOpenChange, document: doc }: Docum
             </div>
 
             {expiryStatus && (
-              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${expiryStatus.color}`}>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${expiryStatus.color}`}
+              >
                 {expiryStatus.label}
               </span>
             )}
@@ -318,7 +324,10 @@ export function DocumentViewerModal({ open, onOpenChange, document: doc }: Docum
               <div className="flex items-center gap-1.5 flex-wrap">
                 <Tag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                 {doc.data.tags.map((t) => (
-                  <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  <span
+                    key={t}
+                    className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                  >
                     #{t}
                   </span>
                 ))}
@@ -358,7 +367,9 @@ export function DocumentViewerModal({ open, onOpenChange, document: doc }: Docum
                 {doc.data.notes}
               </p>
             ) : (
-              <p className="italic text-muted-foreground/60 text-[11px]">No notes saved for this document.</p>
+              <p className="italic text-muted-foreground/60 text-[11px]">
+                No notes saved for this document.
+              </p>
             )}
           </div>
         </div>
@@ -370,7 +381,12 @@ export function DocumentViewerModal({ open, onOpenChange, document: doc }: Docum
           </p>
           <div className="flex items-center gap-2">
             {blobUrl && (
-              <Button size="sm" variant="outline" onClick={handleDownload} className="gap-1.5 text-xs">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleDownload}
+                className="gap-1.5 text-xs"
+              >
                 <Download className="h-3.5 w-3.5" />
                 Download Decrypted
               </Button>

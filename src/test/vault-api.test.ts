@@ -251,7 +251,9 @@ describe("My Private Vault API Endpoints", () => {
       });
 
       // DELETE
-      const delReq = new Request("http://localhost/api/vault/entries/entry_123", { method: "DELETE" });
+      const delReq = new Request("http://localhost/api/vault/entries/entry_123", {
+        method: "DELETE",
+      });
       const delRes = await itemHandlers.DELETE({ request: delReq, params: { id: "entry_123" } });
       const delJson = await delRes.json();
       expect(delJson.success).toBe(true);
@@ -261,7 +263,9 @@ describe("My Private Vault API Endpoints", () => {
       const mockPrisma = {
         vaultEntry: {
           updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          findFirst: vi.fn().mockResolvedValue({ id: "entry_123", userId: mockUser.id, version: 2 }),
+          findFirst: vi
+            .fn()
+            .mockResolvedValue({ id: "entry_123", userId: mockUser.id, version: 2 }),
         },
       };
       (globalThis as any).__prisma = mockPrisma;

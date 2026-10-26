@@ -58,11 +58,7 @@ describe("Vault Cryptography Primitives", () => {
     const keys = await createVaultKeys(masterPassword, fastParams);
     const newMasterPassword = "NewMasterPassword!2026#Updated";
 
-    const rewrapped = await rewrapVaultKeys(
-      keys.rootKeyBytes,
-      newMasterPassword,
-      fastParams,
-    );
+    const rewrapped = await rewrapVaultKeys(keys.rootKeyBytes, newMasterPassword, fastParams);
     expect(rewrapped.saltHex).not.toEqual(keys.saltHex);
 
     // Old password no longer works
@@ -95,7 +91,8 @@ describe("Vault Cryptography Primitives", () => {
       url: "https://github.com",
       username: "faizan1405",
       password: "SuperSecretPassword123!@#",
-      notes: "Line 1: Personal GitHub account\nLine 2: Recovery keys stored offline\nLine 3: 2FA enabled",
+      notes:
+        "Line 1: Personal GitHub account\nLine 2: Recovery keys stored offline\nLine 3: 2FA enabled",
     };
 
     it("encrypts and decrypts password entry preserving multiline notes", async () => {
@@ -154,7 +151,8 @@ describe("Vault Cryptography Primitives", () => {
       documentNumber: "DL-0420110012345",
       issueDate: "2020-01-15",
       expiryDate: "2030-08-15",
-      notes: "Need renewal before expiry.\nKept in vehicle glovebox.\nIncludes both two-wheeler and four-wheeler endorsements.",
+      notes:
+        "Need renewal before expiry.\nKept in vehicle glovebox.\nIncludes both two-wheeler and four-wheeler endorsements.",
       tags: ["dl", "vehicle", "id"],
       attachments: [
         {
@@ -240,14 +238,7 @@ describe("Vault Cryptography Primitives", () => {
 
       // Wrong docId or attachmentId in AAD fails
       await expect(
-        decryptDocumentFile(
-          ciphertextBuffer,
-          attKey,
-          "wrong-doc-id",
-          attachmentId,
-          userId,
-          iv,
-        ),
+        decryptDocumentFile(ciphertextBuffer, attKey, "wrong-doc-id", attachmentId, userId, iv),
       ).rejects.toThrow();
     });
   });

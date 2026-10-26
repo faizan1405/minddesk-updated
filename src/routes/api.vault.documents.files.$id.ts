@@ -13,10 +13,7 @@ export const Route = createFileRoute("/api/vault/documents/files/$id")({
             throw new api.ApiError(400, "Invalid attachment ID: must be a valid UUID.");
           }
 
-          const { buffer, iv } = await vaultStorage.readEncryptedAttachmentFile(
-            user.id,
-            params.id,
-          );
+          const { buffer, iv } = await vaultStorage.readEncryptedAttachmentFile(user.id, params.id);
 
           return new Response(new Uint8Array(buffer), {
             status: 200,

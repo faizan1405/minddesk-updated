@@ -120,7 +120,13 @@ export async function createVaultDocumentApi(data: {
 
 export async function updateVaultDocumentApi(
   id: string,
-  data: { encrypted_data: string; iv: string; expected_version: number },
+  data: {
+    encrypted_data: string;
+    iv: string;
+    expected_version: number;
+    retained_attachment_ids?: string[];
+    obsolete_attachment_ids?: string[];
+  },
 ): Promise<EncryptedDocumentDto> {
   return api<EncryptedDocumentDto>(`/api/vault/documents/${id}`, {
     method: "PATCH",
@@ -128,7 +134,9 @@ export async function updateVaultDocumentApi(
   });
 }
 
-export async function deleteVaultDocumentApi(id: string): Promise<{ success: boolean; id: string }> {
+export async function deleteVaultDocumentApi(
+  id: string,
+): Promise<{ success: boolean; id: string }> {
   return api<{ success: boolean; id: string }>(`/api/vault/documents/${id}`, {
     method: "DELETE",
   });
@@ -137,12 +145,9 @@ export async function deleteVaultDocumentApi(id: string): Promise<{ success: boo
 export async function deleteVaultAttachmentApi(
   attachmentId: string,
 ): Promise<{ success: boolean; id: string }> {
-  return api<{ success: boolean; id: string }>(
-    `/api/vault/documents/attachments/${attachmentId}`,
-    {
-      method: "DELETE",
-    },
-  );
+  return api<{ success: boolean; id: string }>(`/api/vault/documents/attachments/${attachmentId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function uploadVaultAttachmentApi(
@@ -155,18 +160,15 @@ export async function uploadVaultAttachmentApi(
 
   if (isPreview) {
     const base64Data = uint8ToBase64(new Uint8Array(encryptedBuffer));
-    return api<{ id: string; encrypted_size: number; iv: string }>(
-      "/api/vault/documents/upload",
-      {
-        method: "POST",
-        body: {
-          document_id: documentId,
-          attachment_id: attachmentId,
-          iv,
-          base64: base64Data,
-        },
+    return api<{ id: string; encrypted_size: number; iv: string }>("/api/vault/documents/upload", {
+      method: "POST",
+      body: {
+        document_id: documentId,
+        attachment_id: attachmentId,
+        iv,
+        base64: base64Data,
       },
-    );
+    });
   }
 
   const formData = new FormData();

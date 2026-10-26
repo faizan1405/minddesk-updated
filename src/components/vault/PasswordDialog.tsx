@@ -77,8 +77,8 @@ export function PasswordDialog({ open, onOpenChange, editingItem }: PasswordDial
         editingItem?.version,
       );
       onOpenChange(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to save password.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to save password.");
     } finally {
       setIsSubmitting(false);
     }
@@ -226,7 +226,9 @@ export function PasswordDialog({ open, onOpenChange, editingItem }: PasswordDial
             </Button>
             <Button type="submit" size="sm" disabled={isSubmitting} className="gap-1.5">
               <KeyRound className="h-3.5 w-3.5" />
-              <span>{isSubmitting ? "Saving..." : editingItem ? "Update Entry" : "Save to Vault"}</span>
+              <span>
+                {isSubmitting ? "Saving..." : editingItem ? "Update Entry" : "Save to Vault"}
+              </span>
             </Button>
           </DialogFooter>
         </form>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Copy, Check, RefreshCw, KeyRound, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -29,15 +29,15 @@ export function PasswordGenerator({ onUsePassword, className }: PasswordGenerato
   const [password, setPassword] = useState("");
   const [copied, setCopied] = useState(false);
 
-  const regenerate = () => {
+  const regenerate = useCallback(() => {
     const pw = generatePassword(options);
     setPassword(pw);
     setCopied(false);
-  };
+  }, [options]);
 
   useEffect(() => {
     regenerate();
-  }, [options]);
+  }, [regenerate]);
 
   const copyToClipboard = async () => {
     try {

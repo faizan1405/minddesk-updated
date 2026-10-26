@@ -51,12 +51,7 @@ export const DOCUMENT_PRESET_CATEGORIES = [
 ] as const;
 
 export const MAX_DOCUMENT_FILE_SIZE = 15 * 1024 * 1024; // 15MB
-export const ALLOWED_DOC_TYPES = [
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-];
+export const ALLOWED_DOC_TYPES = ["application/pdf", "image/png", "image/jpeg", "image/webp"];
 
 /**
  * Reads a File or Blob into an ArrayBuffer across all environments (browser, Web Worker, and test runners).
@@ -152,9 +147,9 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
   const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
 
   // New staged attachments
-  const [stagedFiles, setStagedFiles] = useState<
-    Array<{ id: string; file: File; label: string }>
-  >([]);
+  const [stagedFiles, setStagedFiles] = useState<Array<{ id: string; file: File; label: string }>>(
+    [],
+  );
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -163,7 +158,7 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
   useEffect(() => {
     if (editingItem) {
       setTitle(editingItem.data.title || "");
-      if (DOCUMENT_PRESET_CATEGORIES.includes(editingItem.data.category as any)) {
+      if ((DOCUMENT_PRESET_CATEGORIES as readonly string[]).includes(editingItem.data.category)) {
         setCategory(editingItem.data.category);
         setCustomCategory("");
       } else {
@@ -206,8 +201,7 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
       const mime = f.type.toLowerCase();
       const ext = f.name.toLowerCase();
       const isAllowedExtOrMime =
-        ALLOWED_DOC_TYPES.includes(mime) ||
-        /\.(pdf|png|jpe?g|webp)$/i.test(ext);
+        ALLOWED_DOC_TYPES.includes(mime) || /\.(pdf|png|jpe?g|webp)$/i.test(ext);
 
       if (!isAllowedExtOrMime) {
         toast.error(`"${f.name}" has unsupported format. Use PDF, PNG, JPG, or WebP.`);
@@ -256,9 +250,7 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
   };
 
   const updateStagedLabel = (id: string, label: string) => {
-    setStagedFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, label } : f)),
-    );
+    setStagedFiles((prev) => prev.map((f) => (f.id === id ? { ...f, label } : f)));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -293,8 +285,8 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
         editingItem?.version,
       );
       onOpenChange(false);
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to save document.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to save document.");
     } finally {
       setIsSubmitting(false);
     }
@@ -313,7 +305,8 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            Files and metadata are client-side encrypted before storage. Safe for identity cards & records.
+            Files and metadata are client-side encrypted before storage. Safe for identity cards &
+            records.
           </DialogDescription>
         </DialogHeader>
 
@@ -416,7 +409,8 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-medium">
-                Document Attachments <span className="text-muted-foreground font-normal">(PDF, JPG, PNG, WebP)</span>
+                Document Attachments{" "}
+                <span className="text-muted-foreground font-normal">(PDF, JPG, PNG, WebP)</span>
               </Label>
               <span className="text-[10px] text-muted-foreground">Up to 15 MB / file</span>
             </div>
@@ -519,7 +513,8 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <Label htmlFor="doc-notes" className="text-xs font-medium">
-                Private Document Notes <span className="text-muted-foreground font-normal">(multiline)</span>
+                Private Document Notes{" "}
+                <span className="text-muted-foreground font-normal">(multiline)</span>
               </Label>
               <span className="text-[10px] text-muted-foreground">Encrypted with document</span>
             </div>

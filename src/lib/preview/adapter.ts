@@ -288,6 +288,14 @@ function handlePreviewRequest(
     if (expected !== undefined && d["version"] !== expected) {
       return err(409, "Conflict: Document has been modified elsewhere.");
     }
+    // Safe post-commit obsolete attachment retirement
+    const obsolete = (b["obsolete_attachment_ids"] as string[]) || [];
+    for (const obsId of obsolete) {
+      db.vaultAttachments.delete(obsId);
+    }
+    const currentAtts = (d["attachments"] as Array<{ id: string }>) || [];
+    d["attachments"] = currentAtts.filter((a) => !obsolete.includes(a.id));
+
     touch(d, {
       encrypted_data: b["encrypted_data"],
       iv: b["iv"],

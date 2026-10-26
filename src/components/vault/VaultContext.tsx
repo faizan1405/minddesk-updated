@@ -72,14 +72,10 @@ interface VaultContextType {
   setupVault: (masterPassword: string) => Promise<void>;
   unlockVault: (masterPassword: string) => Promise<boolean>;
   lockVault: () => void;
-  changeMasterPassword: (newPassword: string) => Promise<void>;
+  changeMasterPassword: (currentPassword: string, newPassword: string) => Promise<void>;
 
   // Password operations
-  savePassword: (
-    data: PasswordEntryData,
-    id?: string,
-    expectedVersion?: number,
-  ) => Promise<void>;
+  savePassword: (data: PasswordEntryData, id?: string, expectedVersion?: number) => Promise<void>;
   deletePassword: (id: string) => Promise<void>;
 
   // Document operations
@@ -199,11 +195,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       try {
         const meta = await fetchVaultMeta();
         if (cancelled) return;
-        setVaultMeta(meta);
-        setStatus(meta.initialized ? "locked" : "uninitialized");
+        setVaultMeta((prev) => (prev?.initialized ? prev : meta));
+        setStatus((prev) => {
+          if (prev === "unlocked" || prev === "locked") return prev;
+          return meta.initialized ? "locked" : "uninitialized";
+        });
       } catch (err) {
         console.error("[vault] Failed to fetch meta:", err);
-        if (!cancelled) setStatus("uninitialized");
+        if (!cancelled) {
+          setStatus((prev) => (prev === "unlocked" || prev === "locked" ? prev : "uninitialized"));
+        }
       }
     }
     checkMeta();
@@ -441,15 +442,51 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [user, vaultMeta, timeoutMinutes, loadVaultData],
   );
 
-  // Change master password with optimistic concurrency protection
+  // Change master password with local verification and optimistic concurrency protection
   const changeMasterPassword = useCallback(
-    async (newPassword: string) => {
-      if (!rootKeyRef.current || !vaultMeta) {
-        throw new Error("Vault must be unlocked to change master password.");
+    async (currentPassword: string, newPassword: string) => {
+      if (
+        !rootKeyRef.current ||
+        !vaultMeta ||
+        !vaultMeta.salt ||
+        !vaultMeta.wrapped_key ||
+        !vaultMeta.wrapped_key_iv
+      ) {
+        throw new Error("Vault must be unlocked with valid metadata to change master password.");
+      }
+      if (!currentPassword) {
+        throw new Error("Please enter your current master password.");
+      }
+      if (!newPassword || newPassword.length < 8) {
+        throw new Error("New master password must be at least 8 characters.");
       }
 
       const gen = unlockGenerationRef.current;
 
+      // 1. Verify current master password locally against wrapped key (never sent to server)
+      try {
+        await unlockVault(
+          currentPassword,
+          vaultMeta.salt,
+          vaultMeta.wrapped_key,
+          vaultMeta.wrapped_key_iv,
+          {
+            iterations: vaultMeta.iterations,
+            memoryCost: vaultMeta.memory_cost,
+            parallelism: vaultMeta.parallelism,
+          },
+        );
+      } catch {
+        throw new Error(
+          "Current master password is incorrect. Please re-enter your current password.",
+        );
+      }
+
+      if (unlockGenerationRef.current !== gen) {
+        throw new Error("Vault locked during password change.");
+      }
+
+      // 2. Rewrap existing root DEK with new master password (neither password sent in plaintext)
       const rewrapped = await rewrapVaultKeys(rootKeyRef.current, newPassword, {
         iterations: vaultMeta.iterations,
         memoryCost: vaultMeta.memory_cost,
@@ -483,15 +520,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         );
 
         toast.success("Master password updated successfully.");
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorObj = err as { status?: number; message?: string };
         if (
-          err?.status === 409 ||
-          err?.message?.includes("Conflict") ||
-          err?.message?.includes("409")
+          errorObj?.status === 409 ||
+          errorObj?.message?.includes("Conflict") ||
+          errorObj?.message?.includes("409")
         ) {
-          toast.error(
-            "Conflict: Master password was changed from another session. Please reload.",
-          );
+          toast.error("Conflict: Master password was changed from another session. Please reload.");
         }
         throw err;
       }
@@ -534,15 +570,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             ),
           );
           toast.success("Password entry updated.");
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errorObj = err as { status?: number; message?: string };
           if (
-            err?.status === 409 ||
-            err?.message?.includes("Conflict") ||
-            err?.message?.includes("409")
+            errorObj?.status === 409 ||
+            errorObj?.message?.includes("Conflict") ||
+            errorObj?.message?.includes("409")
           ) {
-            toast.error(
-              "Conflict: Password entry was modified by another session. Please reload.",
-            );
+            toast.error("Conflict: Password entry was modified by another session. Please reload.");
           }
           throw err;
         }
@@ -716,17 +751,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // ==========================================
       const docId = id;
 
-      // 1. P1 Attachment Lifecycle: Securely delete explicitly removed attachments from disk & DB
-      if (removedAttachmentIds && removedAttachmentIds.length > 0) {
-        for (const remId of removedAttachmentIds) {
-          try {
-            await deleteVaultAttachmentApi(remId);
-          } catch (e) {
-            console.warn("[vault] Failed to delete removed attachment:", remId, e);
-          }
-        }
-      }
-
+      // 1. Filter out removed attachments for the new manifest, BUT DO NOT DELETE THEM YET!
+      // They must remain intact in Hostinger storage until the updated metadata version is committed.
       const activeExistingAttachments = meta.attachments.filter(
         (a) => !removedAttachmentIds?.includes(a.id),
       );
@@ -785,10 +811,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           throw new Error("Vault locked during document update.");
         }
 
+        // 4. ATOMIC METADATA COMMIT WITH POST-COMMIT RETIREMENT
+        // The server verifies expected_version, commits the new metadata, and ONLY THEN retires obsolete attachments!
+        const retainedAttachmentIds = updatedAttachments.map((a) => a.id);
+        const obsoleteAttachmentIds = removedAttachmentIds || [];
+
         const updated = await updateVaultDocumentApi(id, {
           encrypted_data: encrypted.ciphertext,
           iv: encrypted.iv,
           expected_version: expectedVersion ?? 1,
+          retained_attachment_ids: retainedAttachmentIds,
+          obsolete_attachment_ids: obsoleteAttachmentIds,
         });
 
         if (unlockGenerationRef.current !== gen) return;
@@ -808,8 +841,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           ),
         );
         toast.success("Document updated.");
-      } catch (err: any) {
-        // Rollback newly uploaded attachments on error
+      } catch (err: unknown) {
+        // Rollback newly uploaded attachments on error.
+        // Existing attachments were NEVER deleted and remain 100% intact!
         for (const attId of newlyUploadedAttIds) {
           try {
             await deleteVaultAttachmentApi(attId);
@@ -818,10 +852,11 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        const errorObj = err as { status?: number; message?: string };
         if (
-          err?.status === 409 ||
-          err?.message?.includes("Conflict") ||
-          err?.message?.includes("409")
+          errorObj?.status === 409 ||
+          errorObj?.message?.includes("Conflict") ||
+          errorObj?.message?.includes("409")
         ) {
           toast.error("Conflict: Document was modified by another session. Please reload.");
         }

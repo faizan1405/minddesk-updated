@@ -86,7 +86,8 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
     } else if (days <= 30) {
       expiryStatus = {
         label: `Expires in ${days} days`,
-        badgeCls: "bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold border border-amber-500/30",
+        badgeCls:
+          "bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold border border-amber-500/30",
       };
     } else {
       expiryStatus = {
@@ -164,7 +165,11 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
                       className="text-muted-foreground hover:text-foreground"
                       title={revealNumber ? "Mask number" : "Reveal number"}
                     >
-                      {revealNumber ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      {revealNumber ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
                     </button>
                   )}
                 </div>
@@ -177,7 +182,9 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
                 <div className="flex items-center gap-1.5 font-medium text-foreground">
                   <Layers className="h-3.5 w-3.5 text-primary shrink-0" />
                   <span>
-                    {attachmentCount > 0 ? `${attachmentCount} file${attachmentCount > 1 ? "s" : ""}` : "No files"}
+                    {attachmentCount > 0
+                      ? `${attachmentCount} file${attachmentCount > 1 ? "s" : ""}`
+                      : "No files"}
                   </span>
                 </div>
               </div>
@@ -215,7 +222,9 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
                   {item.data.notes}
                 </p>
               ) : (
-                <p className="italic text-muted-foreground/60 text-[11px]">No private notes saved.</p>
+                <p className="italic text-muted-foreground/60 text-[11px]">
+                  No private notes saved.
+                </p>
               )}
             </div>
           </CardContent>

@@ -92,7 +92,9 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
                 </h3>
                 {urlDisplay && (
                   <a
-                    href={item.data.url?.startsWith("http") ? item.data.url : `https://${item.data.url}`}
+                    href={
+                      item.data.url?.startsWith("http") ? item.data.url : `https://${item.data.url}`
+                    }
                     target="_blank"
                     rel="noreferrer noopener"
                     className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-primary transition-colors truncate max-w-[200px]"
@@ -241,7 +243,9 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
                   {item.data.notes}
                 </p>
               ) : (
-                <p className="italic text-muted-foreground/60 text-[11px]">No private notes saved.</p>
+                <p className="italic text-muted-foreground/60 text-[11px]">
+                  No private notes saved.
+                </p>
               )}
             </div>
           </CardContent>
@@ -251,7 +255,9 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
         <CardFooter className="flex items-center justify-between border-t bg-muted/10 px-4 py-2 text-[10px] text-muted-foreground">
           <div className="flex items-center gap-1">
             <Clock className="h-2.5 w-2.5" />
-            <span>Updated {formatDistanceToNow(new Date(item.updatedAt), { addSuffix: true })}</span>
+            <span>
+              Updated {formatDistanceToNow(new Date(item.updatedAt), { addSuffix: true })}
+            </span>
           </div>
           <span title={format(new Date(item.createdAt), "PPpp")}>
             Created {format(new Date(item.createdAt), "MMM d, yyyy")}
@@ -266,8 +272,8 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
             <AlertDialogTitle>Delete saved password?</AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete the credentials for{" "}
-              <strong className="text-foreground">{item.data.name}</strong>? This action is permanent
-              and cannot be undone.
+              <strong className="text-foreground">{item.data.name}</strong>? This action is
+              permanent and cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

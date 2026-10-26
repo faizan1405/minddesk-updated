@@ -10,8 +10,7 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
           const user = await api.requireUser(request);
 
           // P1: Upfront Content-Length check before buffering body
-          const MAX_UPLOAD_REQUEST_BYTES =
-            vaultStorage.MAX_VAULT_ATTACHMENT_BYTES + 64 * 1024; // 25 MB + 64 KB multipart overhead
+          const MAX_UPLOAD_REQUEST_BYTES = vaultStorage.MAX_VAULT_ATTACHMENT_BYTES + 64 * 1024; // 25 MB + 64 KB multipart overhead
           const contentLengthHeader = request.headers.get("content-length");
           if (contentLengthHeader) {
             const contentLength = parseInt(contentLengthHeader, 10);
@@ -46,9 +45,11 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
             });
           }
 
-          const formData = await reqToParse.formData().catch((err: any) => {
+          const formData = await reqToParse.formData().catch((err: unknown) => {
             if (err instanceof api.ApiError) throw err;
-            if (err?.status === 413 || err?.statusCode === 413) {
+            const status = (err as { status?: number; statusCode?: number })?.status;
+            const statusCode = (err as { status?: number; statusCode?: number })?.statusCode;
+            if (status === 413 || statusCode === 413) {
               throw new api.ApiError(413, "Payload Too Large: Upload exceeds 25 MB limit.");
             }
             throw new api.ApiError(400, "Invalid form data in upload request.");
@@ -94,7 +95,10 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
           }
 
           if (buffer.length > vaultStorage.MAX_VAULT_ATTACHMENT_BYTES) {
-            throw new api.ApiError(413, "Payload Too Large: Encrypted attachment exceeds 25 MB limit.");
+            throw new api.ApiError(
+              413,
+              "Payload Too Large: Encrypted attachment exceeds 25 MB limit.",
+            );
           }
 
           const saved = await vaultStorage.saveEncryptedAttachmentFile(

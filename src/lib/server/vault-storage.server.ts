@@ -91,8 +91,21 @@ export async function saveEncryptedAttachmentFile(
     // Exclusive creation: fails with EEXIST if file already exists
     await writeFile(filePath, encryptedBuffer, { flag: "wx" });
     fileWritten = true;
-  } catch (err: any) {
-    if (err?.code === "EEXIST") {
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException)?.code === "EEXIST") {
+      // Check for safe idempotent retry: exact same attachment uploaded previously
+      const prisma = db();
+      const existing = await prisma.vaultDocumentAttachment.findFirst({
+        where: { id: attachmentId, documentId, userId },
+      });
+      if (existing && existing.encryptedSize === encryptedBuffer.length && existing.iv === iv) {
+        return {
+          id: existing.id,
+          storageKey: existing.storageKey,
+          encryptedSize: existing.encryptedSize,
+          iv: existing.iv,
+        };
+      }
       throw new ApiError(409, "Attachment file with this ID already exists on storage.");
     }
     throw err;
@@ -187,4 +200,62 @@ export async function deleteEncryptedAttachmentFile(
   await prisma.vaultDocumentAttachment.delete({
     where: { id: attachmentId },
   });
+}
+
+/**
+ * Safely reconciles abandoned storage files.
+ * Rules:
+ * 1. Scans storage directory for .enc files.
+ * 2. Compares against vault_document_attachments database records.
+ * 3. Only removes .enc files on disk if:
+ *    a) No matching database record exists for that attachment ID, AND
+ *    b) File was created more than olderThanMs ago (grace period for active in-flight uploads).
+ * 4. NEVER deletes an active or valid document attachment!
+ */
+export async function reconcileAbandonedVaultStorage(
+  olderThanMs: number = 2 * 60 * 60 * 1000,
+): Promise<{ scannedFiles: number; cleanedFiles: number }> {
+  const { readdir, stat } = await import("node:fs/promises");
+  const storageDir = getVaultStorageDir();
+  if (!existsSync(storageDir)) {
+    return { scannedFiles: 0, cleanedFiles: 0 };
+  }
+
+  const files = await readdir(storageDir);
+  const prisma = db();
+  let scannedFiles = 0;
+  let cleanedFiles = 0;
+  const now = Date.now();
+
+  for (const fileName of files) {
+    if (!fileName.endsWith(".enc")) continue;
+    scannedFiles++;
+    const match = fileName.match(
+      /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.enc$/i,
+    );
+    if (!match) continue;
+    const attachmentId = match[1]!;
+
+    const filePath = join(storageDir, fileName);
+    try {
+      const fileStat = await stat(filePath);
+      const ageMs = now - fileStat.mtimeMs;
+      if (ageMs < olderThanMs) {
+        continue;
+      }
+
+      const record = await prisma.vaultDocumentAttachment.findUnique({
+        where: { id: attachmentId },
+      });
+
+      if (!record) {
+        await unlink(filePath);
+        cleanedFiles++;
+      }
+    } catch {
+      // Best-effort
+    }
+  }
+
+  return { scannedFiles, cleanedFiles };
 }

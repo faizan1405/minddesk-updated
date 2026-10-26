@@ -15,6 +15,7 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
   const mockUser = { id: "user_sec_test_1", email: "sec-tester@minddesk.com" };
   const validDocId = "11111111-2222-4333-8444-555555555555";
   const validAttId = "66666666-7777-4888-8999-000000000000";
+  const validAttId2 = "77777777-8888-4999-8000-111111111111";
 
   let tempDir: string;
 
@@ -33,7 +34,9 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
     process.env = { ...originalEnv };
     try {
       await rm(tempDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      // ignore cleanup errors
+    }
   });
 
   // =========================================================================
@@ -60,18 +63,10 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       expect(safePath.endsWith(`${validAttId}.enc`)).toBe(true);
 
       // Traversal sequences must throw
-      expect(() =>
-        vaultStorage.getSafeAttachmentPath(tempDir, "../../secret.enc"),
-      ).toThrow();
-      expect(() =>
-        vaultStorage.getSafeAttachmentPath(tempDir, `..\\..\\secret.enc`),
-      ).toThrow();
-      expect(() =>
-        vaultStorage.getSafeAttachmentPath(tempDir, `${validAttId}.txt`),
-      ).toThrow();
-      expect(() =>
-        vaultStorage.getSafeAttachmentPath(tempDir, "malicious/nested.enc"),
-      ).toThrow();
+      expect(() => vaultStorage.getSafeAttachmentPath(tempDir, "../../secret.enc")).toThrow();
+      expect(() => vaultStorage.getSafeAttachmentPath(tempDir, `..\\..\\secret.enc`)).toThrow();
+      expect(() => vaultStorage.getSafeAttachmentPath(tempDir, `${validAttId}.txt`)).toThrow();
+      expect(() => vaultStorage.getSafeAttachmentPath(tempDir, "malicious/nested.enc")).toThrow();
     });
 
     it("rejects saveEncryptedAttachmentFile if documentId or attachmentId is malformed or traversal", async () => {
@@ -97,9 +92,16 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       ).rejects.toThrow("Invalid attachment ID");
     });
 
-    it("enforces exclusive file creation: fails with 409 Conflict if file already exists", async () => {
+    it("enforces exclusive file creation: fails with 409 Conflict if file already exists with different content", async () => {
       const existingFile = join(tempDir, `${validAttId}.enc`);
       await writeFile(existingFile, Buffer.from("original-protected-file-data"));
+
+      const mockPrisma = {
+        vaultDocumentAttachment: {
+          findFirst: vi.fn().mockResolvedValue(null), // no matching DB record
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
 
       const buffer = Buffer.from("new-attempted-overwrite-data");
 
@@ -119,6 +121,38 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       // SAFE CLEANUP: Original file MUST NOT be deleted or overwritten!
       const content = await readFile(existingFile, "utf8");
       expect(content).toBe("original-protected-file-data");
+    });
+
+    it("supports idempotent retry: returns existing record if identical attachment was already saved", async () => {
+      const existingFile = join(tempDir, `${validAttId}.enc`);
+      const testBuffer = Buffer.from("identical-encrypted-payload");
+      await writeFile(existingFile, testBuffer);
+
+      const mockPrisma = {
+        vaultDocumentAttachment: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: validAttId,
+            documentId: validDocId,
+            userId: mockUser.id,
+            storageKey: `${validAttId}.enc`,
+            encryptedSize: testBuffer.length,
+            iv: "matchingIv123456",
+          }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      const result = await vaultStorage.saveEncryptedAttachmentFile(
+        mockUser.id,
+        validDocId,
+        validAttId,
+        testBuffer,
+        "matchingIv123456",
+      );
+
+      expect(result.id).toBe(validAttId);
+      expect(result.encryptedSize).toBe(testBuffer.length);
+      expect(result.iv).toBe("matchingIv123456");
     });
 
     it("safely unlinks only newly created file when database insert fails", async () => {
@@ -144,6 +178,46 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
 
       // Verify the failed file was cleaned up and does not linger on disk
       await expect(readFile(targetFile)).rejects.toThrow();
+    });
+  });
+
+  // =========================================================================
+  // STORAGE RECONCILIATION & FAILURE RECOVERY
+  // =========================================================================
+  describe("Storage Reconciliation & Abandoned File Cleanup", () => {
+    it("safely cleans up unreferenced abandoned files older than grace period without touching active files", async () => {
+      const { utimes } = await import("node:fs/promises");
+      const activeFile = join(tempDir, `${validAttId}.enc`);
+      const abandonedFile = join(tempDir, `${validAttId2}.enc`);
+
+      await writeFile(activeFile, Buffer.from("active-file-data"));
+      await writeFile(abandonedFile, Buffer.from("abandoned-file-data"));
+
+      // Set abandoned file timestamp to 3 hours in the past
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      await utimes(abandonedFile, threeHoursAgo, threeHoursAgo);
+
+      const mockPrisma = {
+        vaultDocumentAttachment: {
+          findUnique: vi.fn().mockImplementation(async ({ where }) => {
+            if (where.id === validAttId) {
+              return { id: validAttId, storageKey: `${validAttId}.enc` };
+            }
+            return null; // abandonedFile has no DB record
+          }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      // Run reconciliation with default 2 hours grace period
+      const res = await vaultStorage.reconcileAbandonedVaultStorage();
+      expect(res.scannedFiles).toBe(2);
+      expect(res.cleanedFiles).toBe(1);
+
+      // Active file MUST remain on disk!
+      expect(await readFile(activeFile, "utf8")).toBe("active-file-data");
+      // Abandoned unreferenced file was cleaned up
+      await expect(readFile(abandonedFile)).rejects.toThrow();
     });
   });
 
@@ -225,10 +299,13 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
   });
 
   // =========================================================================
-  // P1 — OPTIMISTIC CONCURRENCY PROTECTION FOR DOCUMENTS
+  // P1 — SAFE ATTACHMENT RETIREMENT ON DOCUMENT UPDATE
   // =========================================================================
-  describe("P1: Document Concurrency Protection", () => {
-    it("updates document metadata when expected_version matches", async () => {
+  describe("P1: Safe Document Update & Obsolete Attachment Retirement", () => {
+    it("commits document metadata update and then retires obsolete attachments", async () => {
+      const diskFile = join(tempDir, `${validAttId}.enc`);
+      await writeFile(diskFile, Buffer.from("obsolete-file-content"));
+
       const mockPrisma = {
         vaultDocument: {
           updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -242,6 +319,15 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
             attachments: [],
           }),
         },
+        vaultDocumentAttachment: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: validAttId,
+            documentId: validDocId,
+            userId: mockUser.id,
+            storageKey: `${validAttId}.enc`,
+          }),
+          delete: vi.fn().mockResolvedValue({ id: validAttId }),
+        },
       };
       (globalThis as any).__prisma = mockPrisma;
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
@@ -254,6 +340,8 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
           encrypted_data: "updatedDocEncryptedData",
           iv: "dGVzdGl2YmFzZTY0Cg==",
           expected_version: 1,
+          retained_attachment_ids: [validAttId2],
+          obsolete_attachment_ids: [validAttId],
         }),
       });
 
@@ -266,17 +354,27 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
         where: { id: validDocId, userId: mockUser.id, version: 1 },
         data: expect.objectContaining({ version: { increment: 1 } }),
       });
+
+      // Verify obsolete attachment was deleted from disk and DB
+      await expect(readFile(diskFile)).rejects.toThrow();
     });
 
-    it("returns 409 Conflict when expected_version does not match current version", async () => {
+    it("NEVER deletes obsolete attachments when metadata update fails with 409 Conflict", async () => {
+      const diskFile = join(tempDir, `${validAttId}.enc`);
+      await writeFile(diskFile, Buffer.from("must-not-be-deleted-file"));
+
       const mockPrisma = {
         vaultDocument: {
-          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }), // 409 Conflict!
           findFirst: vi.fn().mockResolvedValue({
             id: validDocId,
             userId: mockUser.id,
-            version: 3, // already updated by another device
+            version: 3, // modified elsewhere
           }),
+        },
+        vaultDocumentAttachment: {
+          findFirst: vi.fn(),
+          delete: vi.fn(),
         },
       };
       (globalThis as any).__prisma = mockPrisma;
@@ -290,13 +388,62 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
           encrypted_data: "updatedDocEncryptedData",
           iv: "dGVzdGl2YmFzZTY0Cg==",
           expected_version: 1, // Stale version
+          obsolete_attachment_ids: [validAttId],
         }),
       });
 
       const res = await handlers.PATCH({ request: req, params: { id: validDocId } });
       expect(res.status).toBe(409);
-      const json = await res.json();
-      expect(json.error).toContain("Conflict");
+
+      // CRITICAL DATA INTEGRITY CHECK: Obsolete attachment MUST NOT be deleted!
+      expect(mockPrisma.vaultDocumentAttachment.delete).not.toHaveBeenCalled();
+      const content = await readFile(diskFile, "utf8");
+      expect(content).toBe("must-not-be-deleted-file");
+    });
+
+    it("safety check: never deletes an attachment that is also listed in retained_attachment_ids", async () => {
+      const diskFile = join(tempDir, `${validAttId}.enc`);
+      await writeFile(diskFile, Buffer.from("retained-attachment-content"));
+
+      const mockPrisma = {
+        vaultDocument: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
+            id: validDocId,
+            encryptedData: "updatedDoc",
+            iv: "dGVzdGl2YmFzZTY0Cg==",
+            version: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attachments: [],
+          }),
+        },
+        vaultDocumentAttachment: {
+          findFirst: vi.fn(),
+          delete: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultDocumentItemRoute.options as any).server.handlers;
+      const req = new Request(`http://localhost/api/vault/documents/${validDocId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encrypted_data: "updatedDoc",
+          iv: "dGVzdGl2YmFzZTY0Cg==",
+          expected_version: 1,
+          // Accidental overlap in client request: listed in both retained and obsolete
+          retained_attachment_ids: [validAttId],
+          obsolete_attachment_ids: [validAttId],
+        }),
+      });
+
+      const res = await handlers.PATCH({ request: req, params: { id: validDocId } });
+      expect(res.status).toBe(200);
+      expect(mockPrisma.vaultDocumentAttachment.delete).not.toHaveBeenCalled();
+      expect(await readFile(diskFile, "utf8")).toBe("retained-attachment-content");
     });
   });
 
@@ -323,11 +470,19 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
     });
 
     it("validates authentic WebP files", async () => {
-      // RIFF....WEBP
       const webpHeader = new Uint8Array([
-        0x52, 0x49, 0x46, 0x46, // RIFF
-        0x20, 0x00, 0x00, 0x00, // length
-        0x57, 0x45, 0x42, 0x50, // WEBP
+        0x52,
+        0x49,
+        0x46,
+        0x46, // RIFF
+        0x20,
+        0x00,
+        0x00,
+        0x00, // length
+        0x57,
+        0x45,
+        0x42,
+        0x50, // WEBP
       ]);
       const file = new File([webpHeader], "graphic.webp", { type: "image/webp" });
       expect(await validateDocumentFileMagicBytes(file)).toBe(true);

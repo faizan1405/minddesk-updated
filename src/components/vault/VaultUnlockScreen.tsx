@@ -14,7 +14,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { useVault } from "./VaultContext";
 import { toast } from "sonner";
 
@@ -47,8 +54,8 @@ export function VaultUnlockScreen() {
       setIsSubmitting(true);
       try {
         await setupVault(password);
-      } catch (err: any) {
-        toast.error(err?.message || "Failed to set up vault.");
+      } catch (err: unknown) {
+        toast.error(err instanceof Error ? err.message : "Failed to set up vault.");
       } finally {
         setIsSubmitting(false);
       }
@@ -93,7 +100,9 @@ export function VaultUnlockScreen() {
                 <Input
                   id="master-password"
                   type={showPassword ? "text" : "password"}
-                  placeholder={isSetup ? "Choose a strong master password" : "Enter master password"}
+                  placeholder={
+                    isSetup ? "Choose a strong master password" : "Enter master password"
+                  }
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoFocus
@@ -138,8 +147,9 @@ export function VaultUnlockScreen() {
                     Zero-Knowledge Architecture
                   </p>
                   <p className="text-muted-foreground pt-0.5">
-                    MindDesk never sends your master password or unencrypted files to the server. If you
-                    forget your master password, your encrypted data cannot be recovered by anyone.
+                    MindDesk never sends your master password or unencrypted files to the server. If
+                    you forget your master password, your encrypted data cannot be recovered by
+                    anyone.
                   </p>
                 </div>
               </div>
