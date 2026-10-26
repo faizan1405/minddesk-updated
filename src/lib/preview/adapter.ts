@@ -61,6 +61,7 @@ function loadSessionDb(): Partial<typeof db> | null {
       pageContent: new Map(parsed.pageContent || []),
       mapData: new Map(parsed.mapData || []),
       images: new Map(parsed.images || []),
+      vaultAttachments: new Map(parsed.vaultAttachments || []),
     };
   } catch {
     return null;
@@ -75,6 +76,7 @@ function saveSessionDb() {
       pageContent: Array.from(db.pageContent.entries()),
       mapData: Array.from(db.mapData.entries()),
       images: Array.from(db.images.entries()),
+      vaultAttachments: Array.from(db.vaultAttachments.entries()),
     };
     window.sessionStorage.setItem("md_preview_db", JSON.stringify(serializable));
   } catch {
@@ -106,6 +108,10 @@ const db = {
   habits: [] as Row[],
   routines: [] as Row[],
   images: new Map<string, unknown>(),
+  vaultMeta: null as Record<string, unknown> | null,
+  vaultEntries: [] as Row[],
+  vaultDocuments: [] as Row[],
+  vaultAttachments: new Map<string, { base64: string; iv: string }>(),
 };
 
 const restored = loadSessionDb();
@@ -180,6 +186,173 @@ function handlePreviewRequest(
   if (!signedIn) return err(401, "Not signed in");
 
   const id = p[2] ?? "";
+
+  // ---- vault ----
+  if (route === "GET /vault/meta") {
+    if (!db.vaultMeta) {
+      return ok({
+        initialized: false,
+        salt: null,
+        wrapped_key: null,
+        wrapped_key_iv: null,
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        version: 1,
+      });
+    }
+    return ok({ initialized: true, ...db.vaultMeta });
+  }
+  if (route === "POST /vault/meta") {
+    if (db.vaultMeta) return err(409, "Vault is already initialized.");
+    db.vaultMeta = {
+      salt: b["salt"],
+      wrapped_key: b["wrapped_key"],
+      wrapped_key_iv: b["wrapped_key_iv"],
+      iterations: b["iterations"] ?? 3,
+      memory_cost: b["memory_cost"] ?? 19456,
+      parallelism: b["parallelism"] ?? 1,
+      version: 1,
+      created_at: now(),
+      updated_at: now(),
+    };
+    return ok({ initialized: true, ...db.vaultMeta }, 201);
+  }
+  if (route === "POST /vault/password") {
+    if (!db.vaultMeta) return err(404, "Vault not initialized.");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && db.vaultMeta["version"] !== expected) {
+      return err(409, "Conflict: Master password was changed from another session.");
+    }
+    db.vaultMeta["salt"] = b["salt"];
+    db.vaultMeta["wrapped_key"] = b["wrapped_key"];
+    db.vaultMeta["wrapped_key_iv"] = b["wrapped_key_iv"];
+    db.vaultMeta["version"] = ((db.vaultMeta["version"] as number) || 1) + 1;
+    db.vaultMeta["updated_at"] = now();
+    return ok({ success: true, version: db.vaultMeta["version"] });
+  }
+  if (route === "GET /vault/entries") {
+    return ok(db.vaultEntries);
+  }
+  if (route === "POST /vault/entries") {
+    const r = {
+      id: (b["id"] as string) || uid(),
+      encrypted_data: b["encrypted_data"],
+      iv: b["iv"],
+      version: 1,
+      created_at: now(),
+      updated_at: now(),
+    } as Row;
+    db.vaultEntries.unshift(r);
+    return ok(r, 201);
+  }
+  if (route === "PATCH /vault/entries/:x") {
+    const e = find(db.vaultEntries, id);
+    if (!e) return err(404, "Vault entry not found");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && e["version"] !== expected) {
+      return err(409, "Conflict: Entry has been modified elsewhere.");
+    }
+    touch(e, {
+      encrypted_data: b["encrypted_data"],
+      iv: b["iv"],
+      version: ((e["version"] as number) || 1) + 1,
+    });
+    return ok(e);
+  }
+  if (route === "DELETE /vault/entries/:x") {
+    remove(db.vaultEntries, (r) => r.id === id);
+    return ok({ success: true, id });
+  }
+  if (route === "GET /vault/documents") {
+    return ok(db.vaultDocuments);
+  }
+  if (route === "GET /vault/documents/:x") {
+    const d = find(db.vaultDocuments, id);
+    if (!d) return err(404, "Vault document not found");
+    return ok(d);
+  }
+  if (route === "POST /vault/documents") {
+    const r = {
+      id: (b["id"] as string) || uid(),
+      encrypted_data: b["encrypted_data"],
+      iv: b["iv"],
+      version: 1,
+      created_at: now(),
+      updated_at: now(),
+      attachments: [],
+    } as Row;
+    db.vaultDocuments.unshift(r);
+    return ok(r, 201);
+  }
+  if (route === "PATCH /vault/documents/:x") {
+    const d = find(db.vaultDocuments, id);
+    if (!d) return err(404, "Vault document not found");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && d["version"] !== expected) {
+      return err(409, "Conflict: Document has been modified elsewhere.");
+    }
+    // Safe post-commit obsolete attachment retirement
+    const obsolete = (b["obsolete_attachment_ids"] as string[]) || [];
+    for (const obsId of obsolete) {
+      db.vaultAttachments.delete(obsId);
+    }
+    const currentAtts = (d["attachments"] as Array<{ id: string }>) || [];
+    d["attachments"] = currentAtts.filter((a) => !obsolete.includes(a.id));
+
+    touch(d, {
+      encrypted_data: b["encrypted_data"],
+      iv: b["iv"],
+      version: ((d["version"] as number) || 1) + 1,
+    });
+    return ok(d);
+  }
+  if (route === "DELETE /vault/documents/:x") {
+    const doc = find(db.vaultDocuments, id);
+    if (doc) {
+      const atts = (doc["attachments"] as Array<{ id: string }>) || [];
+      for (const a of atts) db.vaultAttachments.delete(a.id);
+    }
+    remove(db.vaultDocuments, (r) => r.id === id);
+    return ok({ success: true, id });
+  }
+  if (route === "DELETE /vault/documents/attachments/:x") {
+    db.vaultAttachments.delete(id);
+    for (const doc of db.vaultDocuments) {
+      const atts = (doc["attachments"] as Array<{ id: string }>) || [];
+      const filtered = atts.filter((a) => a.id !== id);
+      if (filtered.length !== atts.length) {
+        doc["attachments"] = filtered;
+      }
+    }
+    return ok({ success: true, id });
+  }
+  if (route === "POST /vault/documents/upload") {
+    const docId = b["document_id"] as string;
+    const attId = b["attachment_id"] as string;
+    const iv = b["iv"] as string;
+    const base64 = (b["base64"] as string) || "";
+    const doc = find(db.vaultDocuments, docId);
+    if (!doc) return err(404, "Target document not found or access denied.");
+    if (db.vaultAttachments.has(attId)) {
+      return err(409, "Attachment file with this ID already exists.");
+    }
+    db.vaultAttachments.set(attId, { base64, iv });
+    const atts = (doc["attachments"] as Array<Record<string, unknown>>) || [];
+    atts.push({
+      id: attId,
+      encrypted_size: base64.length,
+      iv,
+      created_at: now(),
+    });
+    doc["attachments"] = atts;
+    return ok({ id: attId, document_id: docId, encrypted_size: base64.length, iv }, 201);
+  }
+  if (route === "GET /vault/documents/files/:x") {
+    const att = db.vaultAttachments.get(id);
+    if (!att) return err(404, "Attachment not found");
+    return ok(att);
+  }
 
   // ---- settings & account (temporary; security actions are refused in Preview Mode) ----
   if (route === "GET /settings") return ok(previewSettings);

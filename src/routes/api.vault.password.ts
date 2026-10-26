@@ -1,0 +1,60 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { z } from "zod";
+
+const RewrapInput = z.object({
+  salt: z.string().min(16).max(64),
+  wrapped_key: z.string().min(16),
+  wrapped_key_iv: z.string().min(12).max(64),
+  expected_version: z.number().int().min(1),
+});
+
+export const Route = createFileRoute("/api/vault/password")({
+  server: {
+    handlers: {
+      POST: async ({ request }) => {
+        const api = await import("@/lib/server/api.server");
+        return api.handle(async () => {
+          const user = await api.requireUser(request);
+          const body = RewrapInput.parse(await api.readJson(request));
+
+          // P1: Atomic version-checked optimistic concurrency update
+          const result = await api.db().vaultMeta.updateMany({
+            where: {
+              userId: user.id,
+              version: body.expected_version,
+            },
+            data: {
+              salt: body.salt,
+              wrappedKey: body.wrapped_key,
+              wrappedKeyIv: body.wrapped_key_iv,
+              version: { increment: 1 },
+            },
+          });
+
+          if (result.count === 0) {
+            const existing = await api.db().vaultMeta.findUnique({
+              where: { userId: user.id },
+            });
+            if (!existing) {
+              throw new api.ApiError(404, "Vault not found. Please initialize first.");
+            }
+            throw new api.ApiError(
+              409,
+              "Conflict: Master password was changed from another session. Please reload.",
+            );
+          }
+
+          const updated = await api.db().vaultMeta.findUniqueOrThrow({
+            where: { userId: user.id },
+          });
+
+          return api.json({
+            success: true,
+            version: updated.version,
+            updated_at: updated.updatedAt.toISOString(),
+          });
+        });
+      },
+    },
+  },
+});

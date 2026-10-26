@@ -25,6 +25,7 @@ import { Route as AuthenticatedStarredRouteImport } from './routes/_authenticate
 import { Route as AuthenticatedTasksRouteImport } from './routes/_authenticated.tasks'
 import { Route as AuthenticatedTemplatesRouteImport } from './routes/_authenticated.templates'
 import { Route as AuthenticatedTrashRouteImport } from './routes/_authenticated.trash'
+import { Route as AuthenticatedVaultRouteImport } from './routes/_authenticated.vault'
 import { Route as ApiAnalyticsRouteImport } from './routes/api.analytics'
 import { Route as ApiEventsRouteImport } from './routes/api.events'
 import { Route as ApiHabitsRouteImport } from './routes/api.habits'
@@ -72,11 +73,20 @@ import { Route as ApiTrashEmptyRouteImport } from './routes/api.trash.empty'
 import { Route as ApiTrashPermanentRouteImport } from './routes/api.trash.permanent'
 import { Route as ApiTrashRestoreRouteImport } from './routes/api.trash.restore'
 import { Route as ApiTrashRestoreAllRouteImport } from './routes/api.trash.restore-all'
+import { Route as ApiVaultDocumentsRouteImport } from './routes/api.vault.documents'
+import { Route as ApiVaultEntriesRouteImport } from './routes/api.vault.entries'
+import { Route as ApiVaultMetaRouteImport } from './routes/api.vault.meta'
+import { Route as ApiVaultPasswordRouteImport } from './routes/api.vault.password'
 import { Route as AuthenticatedProjectsProjectIdIndexRouteImport } from './routes/_authenticated.projects.$projectId.index'
 import { Route as AuthenticatedProjectsProjectIdPageIdRouteImport } from './routes/_authenticated.projects.$projectId.$pageId'
 import { Route as ApiPlanActivitiesIdRouteImport } from './routes/api.plan.activities.$id'
 import { Route as ApiPlanCategoriesIdRouteImport } from './routes/api.plan.categories.$id'
+import { Route as ApiVaultDocumentsIdRouteImport } from './routes/api.vault.documents.$id'
+import { Route as ApiVaultDocumentsUploadRouteImport } from './routes/api.vault.documents.upload'
+import { Route as ApiVaultEntriesIdRouteImport } from './routes/api.vault.entries.$id'
 import { Route as ApiHabitsIdCompletionsDateRouteImport } from './routes/api.habits.$id.completions.$date'
+import { Route as ApiVaultDocumentsAttachmentsIdRouteImport } from './routes/api.vault.documents.attachments.$id'
+import { Route as ApiVaultDocumentsFilesIdRouteImport } from './routes/api.vault.documents.files.$id'
 import { Route as ApiPlanActivitiesIdExceptionsDateRouteImport } from './routes/api.plan.activities.$id.exceptions.$date'
 
 const IndexRoute = IndexRouteImport.update({
@@ -156,6 +166,11 @@ const AuthenticatedTemplatesRoute = AuthenticatedTemplatesRouteImport.update({
 const AuthenticatedTrashRoute = AuthenticatedTrashRouteImport.update({
   id: '/trash',
   path: '/trash',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
+const AuthenticatedVaultRoute = AuthenticatedVaultRouteImport.update({
+  id: '/vault',
+  path: '/vault',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
 const ApiAnalyticsRoute = ApiAnalyticsRouteImport.update({
@@ -399,6 +414,26 @@ const ApiTrashRestoreAllRoute = ApiTrashRestoreAllRouteImport.update({
   path: '/restore-all',
   getParentRoute: () => ApiTrashRoute,
 } as any)
+const ApiVaultDocumentsRoute = ApiVaultDocumentsRouteImport.update({
+  id: '/api/vault/documents',
+  path: '/api/vault/documents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVaultEntriesRoute = ApiVaultEntriesRouteImport.update({
+  id: '/api/vault/entries',
+  path: '/api/vault/entries',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVaultMetaRoute = ApiVaultMetaRouteImport.update({
+  id: '/api/vault/meta',
+  path: '/api/vault/meta',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVaultPasswordRoute = ApiVaultPasswordRouteImport.update({
+  id: '/api/vault/password',
+  path: '/api/vault/password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedProjectsProjectIdIndexRoute =
   AuthenticatedProjectsProjectIdIndexRouteImport.update({
     id: '/',
@@ -421,11 +456,38 @@ const ApiPlanCategoriesIdRoute = ApiPlanCategoriesIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => ApiPlanCategoriesRoute,
 } as any)
+const ApiVaultDocumentsIdRoute = ApiVaultDocumentsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiVaultDocumentsRoute,
+} as any)
+const ApiVaultDocumentsUploadRoute = ApiVaultDocumentsUploadRouteImport.update({
+  id: '/upload',
+  path: '/upload',
+  getParentRoute: () => ApiVaultDocumentsRoute,
+} as any)
+const ApiVaultEntriesIdRoute = ApiVaultEntriesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => ApiVaultEntriesRoute,
+} as any)
 const ApiHabitsIdCompletionsDateRoute =
   ApiHabitsIdCompletionsDateRouteImport.update({
     id: '/completions/$date',
     path: '/completions/$date',
     getParentRoute: () => ApiHabitsIdRoute,
+  } as any)
+const ApiVaultDocumentsAttachmentsIdRoute =
+  ApiVaultDocumentsAttachmentsIdRouteImport.update({
+    id: '/attachments/$id',
+    path: '/attachments/$id',
+    getParentRoute: () => ApiVaultDocumentsRoute,
+  } as any)
+const ApiVaultDocumentsFilesIdRoute =
+  ApiVaultDocumentsFilesIdRouteImport.update({
+    id: '/files/$id',
+    path: '/files/$id',
+    getParentRoute: () => ApiVaultDocumentsRoute,
   } as any)
 const ApiPlanActivitiesIdExceptionsDateRoute =
   ApiPlanActivitiesIdExceptionsDateRouteImport.update({
@@ -450,6 +512,7 @@ export interface FileRoutesByFullPath {
   '/tasks': typeof AuthenticatedTasksRoute
   '/templates': typeof AuthenticatedTemplatesRoute
   '/trash': typeof AuthenticatedTrashRoute
+  '/vault': typeof AuthenticatedVaultRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -494,14 +557,23 @@ export interface FileRoutesByFullPath {
   '/api/trash/permanent': typeof ApiTrashPermanentRoute
   '/api/trash/restore': typeof ApiTrashRestoreRoute
   '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
+  '/api/vault/documents': typeof ApiVaultDocumentsRouteWithChildren
+  '/api/vault/entries': typeof ApiVaultEntriesRouteWithChildren
+  '/api/vault/meta': typeof ApiVaultMetaRoute
+  '/api/vault/password': typeof ApiVaultPasswordRoute
   '/mind-maps/': typeof AuthenticatedMindMapsIndexRoute
   '/notes/': typeof AuthenticatedNotesIndexRoute
   '/projects/': typeof AuthenticatedProjectsIndexRoute
   '/projects/$projectId/$pageId': typeof AuthenticatedProjectsProjectIdPageIdRoute
   '/api/plan/activities/$id': typeof ApiPlanActivitiesIdRouteWithChildren
   '/api/plan/categories/$id': typeof ApiPlanCategoriesIdRoute
+  '/api/vault/documents/$id': typeof ApiVaultDocumentsIdRoute
+  '/api/vault/documents/upload': typeof ApiVaultDocumentsUploadRoute
+  '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
+  '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
 export interface FileRoutesByTo {
@@ -517,6 +589,7 @@ export interface FileRoutesByTo {
   '/tasks': typeof AuthenticatedTasksRoute
   '/templates': typeof AuthenticatedTemplatesRoute
   '/trash': typeof AuthenticatedTrashRoute
+  '/vault': typeof AuthenticatedVaultRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -560,14 +633,23 @@ export interface FileRoutesByTo {
   '/api/trash/permanent': typeof ApiTrashPermanentRoute
   '/api/trash/restore': typeof ApiTrashRestoreRoute
   '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
+  '/api/vault/documents': typeof ApiVaultDocumentsRouteWithChildren
+  '/api/vault/entries': typeof ApiVaultEntriesRouteWithChildren
+  '/api/vault/meta': typeof ApiVaultMetaRoute
+  '/api/vault/password': typeof ApiVaultPasswordRoute
   '/mind-maps': typeof AuthenticatedMindMapsIndexRoute
   '/notes': typeof AuthenticatedNotesIndexRoute
   '/projects': typeof AuthenticatedProjectsIndexRoute
   '/projects/$projectId/$pageId': typeof AuthenticatedProjectsProjectIdPageIdRoute
   '/api/plan/activities/$id': typeof ApiPlanActivitiesIdRouteWithChildren
   '/api/plan/categories/$id': typeof ApiPlanCategoriesIdRoute
+  '/api/vault/documents/$id': typeof ApiVaultDocumentsIdRoute
+  '/api/vault/documents/upload': typeof ApiVaultDocumentsUploadRoute
+  '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
+  '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
 export interface FileRoutesById {
@@ -588,6 +670,7 @@ export interface FileRoutesById {
   '/_authenticated/tasks': typeof AuthenticatedTasksRoute
   '/_authenticated/templates': typeof AuthenticatedTemplatesRoute
   '/_authenticated/trash': typeof AuthenticatedTrashRoute
+  '/_authenticated/vault': typeof AuthenticatedVaultRoute
   '/api/analytics': typeof ApiAnalyticsRoute
   '/api/events': typeof ApiEventsRouteWithChildren
   '/api/habits': typeof ApiHabitsRouteWithChildren
@@ -632,14 +715,23 @@ export interface FileRoutesById {
   '/api/trash/permanent': typeof ApiTrashPermanentRoute
   '/api/trash/restore': typeof ApiTrashRestoreRoute
   '/api/trash/restore-all': typeof ApiTrashRestoreAllRoute
+  '/api/vault/documents': typeof ApiVaultDocumentsRouteWithChildren
+  '/api/vault/entries': typeof ApiVaultEntriesRouteWithChildren
+  '/api/vault/meta': typeof ApiVaultMetaRoute
+  '/api/vault/password': typeof ApiVaultPasswordRoute
   '/_authenticated/mind-maps/': typeof AuthenticatedMindMapsIndexRoute
   '/_authenticated/notes/': typeof AuthenticatedNotesIndexRoute
   '/_authenticated/projects/': typeof AuthenticatedProjectsIndexRoute
   '/_authenticated/projects/$projectId/$pageId': typeof AuthenticatedProjectsProjectIdPageIdRoute
   '/api/plan/activities/$id': typeof ApiPlanActivitiesIdRouteWithChildren
   '/api/plan/categories/$id': typeof ApiPlanCategoriesIdRoute
+  '/api/vault/documents/$id': typeof ApiVaultDocumentsIdRoute
+  '/api/vault/documents/upload': typeof ApiVaultDocumentsUploadRoute
+  '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
+  '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
 export interface FileRouteTypes {
@@ -660,6 +752,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/templates'
     | '/trash'
+    | '/vault'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -704,14 +797,23 @@ export interface FileRouteTypes {
     | '/api/trash/permanent'
     | '/api/trash/restore'
     | '/api/trash/restore-all'
+    | '/api/vault/documents'
+    | '/api/vault/entries'
+    | '/api/vault/meta'
+    | '/api/vault/password'
     | '/mind-maps/'
     | '/notes/'
     | '/projects/'
     | '/projects/$projectId/$pageId'
     | '/api/plan/activities/$id'
     | '/api/plan/categories/$id'
+    | '/api/vault/documents/$id'
+    | '/api/vault/documents/upload'
+    | '/api/vault/entries/$id'
     | '/projects/$projectId/'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
+    | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -727,6 +829,7 @@ export interface FileRouteTypes {
     | '/tasks'
     | '/templates'
     | '/trash'
+    | '/vault'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -770,14 +873,23 @@ export interface FileRouteTypes {
     | '/api/trash/permanent'
     | '/api/trash/restore'
     | '/api/trash/restore-all'
+    | '/api/vault/documents'
+    | '/api/vault/entries'
+    | '/api/vault/meta'
+    | '/api/vault/password'
     | '/mind-maps'
     | '/notes'
     | '/projects'
     | '/projects/$projectId/$pageId'
     | '/api/plan/activities/$id'
     | '/api/plan/categories/$id'
+    | '/api/vault/documents/$id'
+    | '/api/vault/documents/upload'
+    | '/api/vault/entries/$id'
     | '/projects/$projectId'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
+    | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   id:
     | '__root__'
@@ -797,6 +909,7 @@ export interface FileRouteTypes {
     | '/_authenticated/tasks'
     | '/_authenticated/templates'
     | '/_authenticated/trash'
+    | '/_authenticated/vault'
     | '/api/analytics'
     | '/api/events'
     | '/api/habits'
@@ -841,14 +954,23 @@ export interface FileRouteTypes {
     | '/api/trash/permanent'
     | '/api/trash/restore'
     | '/api/trash/restore-all'
+    | '/api/vault/documents'
+    | '/api/vault/entries'
+    | '/api/vault/meta'
+    | '/api/vault/password'
     | '/_authenticated/mind-maps/'
     | '/_authenticated/notes/'
     | '/_authenticated/projects/'
     | '/_authenticated/projects/$projectId/$pageId'
     | '/api/plan/activities/$id'
     | '/api/plan/categories/$id'
+    | '/api/vault/documents/$id'
+    | '/api/vault/documents/upload'
+    | '/api/vault/entries/$id'
     | '/_authenticated/projects/$projectId/'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
+    | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   fileRoutesById: FileRoutesById
 }
@@ -881,6 +1003,10 @@ export interface RootRouteChildren {
   ApiPlanActivitiesRoute: typeof ApiPlanActivitiesRouteWithChildren
   ApiPlanCategoriesRoute: typeof ApiPlanCategoriesRouteWithChildren
   ApiPlanFocusSessionsRoute: typeof ApiPlanFocusSessionsRoute
+  ApiVaultDocumentsRoute: typeof ApiVaultDocumentsRouteWithChildren
+  ApiVaultEntriesRoute: typeof ApiVaultEntriesRouteWithChildren
+  ApiVaultMetaRoute: typeof ApiVaultMetaRoute
+  ApiVaultPasswordRoute: typeof ApiVaultPasswordRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -995,6 +1121,13 @@ declare module '@tanstack/react-router' {
       path: '/trash'
       fullPath: '/trash'
       preLoaderRoute: typeof AuthenticatedTrashRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/vault': {
+      id: '/_authenticated/vault'
+      path: '/vault'
+      fullPath: '/vault'
+      preLoaderRoute: typeof AuthenticatedVaultRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/api/analytics': {
@@ -1326,6 +1459,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiTrashRestoreAllRouteImport
       parentRoute: typeof ApiTrashRoute
     }
+    '/api/vault/documents': {
+      id: '/api/vault/documents'
+      path: '/api/vault/documents'
+      fullPath: '/api/vault/documents'
+      preLoaderRoute: typeof ApiVaultDocumentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/vault/entries': {
+      id: '/api/vault/entries'
+      path: '/api/vault/entries'
+      fullPath: '/api/vault/entries'
+      preLoaderRoute: typeof ApiVaultEntriesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/vault/meta': {
+      id: '/api/vault/meta'
+      path: '/api/vault/meta'
+      fullPath: '/api/vault/meta'
+      preLoaderRoute: typeof ApiVaultMetaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/vault/password': {
+      id: '/api/vault/password'
+      path: '/api/vault/password'
+      fullPath: '/api/vault/password'
+      preLoaderRoute: typeof ApiVaultPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/projects/$projectId/': {
       id: '/_authenticated/projects/$projectId/'
       path: '/'
@@ -1354,12 +1515,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPlanCategoriesIdRouteImport
       parentRoute: typeof ApiPlanCategoriesRoute
     }
+    '/api/vault/documents/$id': {
+      id: '/api/vault/documents/$id'
+      path: '/$id'
+      fullPath: '/api/vault/documents/$id'
+      preLoaderRoute: typeof ApiVaultDocumentsIdRouteImport
+      parentRoute: typeof ApiVaultDocumentsRoute
+    }
+    '/api/vault/documents/upload': {
+      id: '/api/vault/documents/upload'
+      path: '/upload'
+      fullPath: '/api/vault/documents/upload'
+      preLoaderRoute: typeof ApiVaultDocumentsUploadRouteImport
+      parentRoute: typeof ApiVaultDocumentsRoute
+    }
+    '/api/vault/entries/$id': {
+      id: '/api/vault/entries/$id'
+      path: '/$id'
+      fullPath: '/api/vault/entries/$id'
+      preLoaderRoute: typeof ApiVaultEntriesIdRouteImport
+      parentRoute: typeof ApiVaultEntriesRoute
+    }
     '/api/habits/$id/completions/$date': {
       id: '/api/habits/$id/completions/$date'
       path: '/completions/$date'
       fullPath: '/api/habits/$id/completions/$date'
       preLoaderRoute: typeof ApiHabitsIdCompletionsDateRouteImport
       parentRoute: typeof ApiHabitsIdRoute
+    }
+    '/api/vault/documents/attachments/$id': {
+      id: '/api/vault/documents/attachments/$id'
+      path: '/attachments/$id'
+      fullPath: '/api/vault/documents/attachments/$id'
+      preLoaderRoute: typeof ApiVaultDocumentsAttachmentsIdRouteImport
+      parentRoute: typeof ApiVaultDocumentsRoute
+    }
+    '/api/vault/documents/files/$id': {
+      id: '/api/vault/documents/files/$id'
+      path: '/files/$id'
+      fullPath: '/api/vault/documents/files/$id'
+      preLoaderRoute: typeof ApiVaultDocumentsFilesIdRouteImport
+      parentRoute: typeof ApiVaultDocumentsRoute
     }
     '/api/plan/activities/$id/exceptions/$date': {
       id: '/api/plan/activities/$id/exceptions/$date'
@@ -1447,6 +1643,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedTasksRoute: typeof AuthenticatedTasksRoute
   AuthenticatedTemplatesRoute: typeof AuthenticatedTemplatesRoute
   AuthenticatedTrashRoute: typeof AuthenticatedTrashRoute
+  AuthenticatedVaultRoute: typeof AuthenticatedVaultRoute
   AuthenticatedListsListIdRoute: typeof AuthenticatedListsListIdRoute
 }
 
@@ -1464,6 +1661,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedTasksRoute: AuthenticatedTasksRoute,
   AuthenticatedTemplatesRoute: AuthenticatedTemplatesRoute,
   AuthenticatedTrashRoute: AuthenticatedTrashRoute,
+  AuthenticatedVaultRoute: AuthenticatedVaultRoute,
   AuthenticatedListsListIdRoute: AuthenticatedListsListIdRoute,
 }
 
@@ -1647,6 +1845,35 @@ const ApiPlanCategoriesRouteChildren: ApiPlanCategoriesRouteChildren = {
 const ApiPlanCategoriesRouteWithChildren =
   ApiPlanCategoriesRoute._addFileChildren(ApiPlanCategoriesRouteChildren)
 
+interface ApiVaultDocumentsRouteChildren {
+  ApiVaultDocumentsIdRoute: typeof ApiVaultDocumentsIdRoute
+  ApiVaultDocumentsUploadRoute: typeof ApiVaultDocumentsUploadRoute
+  ApiVaultDocumentsAttachmentsIdRoute: typeof ApiVaultDocumentsAttachmentsIdRoute
+  ApiVaultDocumentsFilesIdRoute: typeof ApiVaultDocumentsFilesIdRoute
+}
+
+const ApiVaultDocumentsRouteChildren: ApiVaultDocumentsRouteChildren = {
+  ApiVaultDocumentsIdRoute: ApiVaultDocumentsIdRoute,
+  ApiVaultDocumentsUploadRoute: ApiVaultDocumentsUploadRoute,
+  ApiVaultDocumentsAttachmentsIdRoute: ApiVaultDocumentsAttachmentsIdRoute,
+  ApiVaultDocumentsFilesIdRoute: ApiVaultDocumentsFilesIdRoute,
+}
+
+const ApiVaultDocumentsRouteWithChildren =
+  ApiVaultDocumentsRoute._addFileChildren(ApiVaultDocumentsRouteChildren)
+
+interface ApiVaultEntriesRouteChildren {
+  ApiVaultEntriesIdRoute: typeof ApiVaultEntriesIdRoute
+}
+
+const ApiVaultEntriesRouteChildren: ApiVaultEntriesRouteChildren = {
+  ApiVaultEntriesIdRoute: ApiVaultEntriesIdRoute,
+}
+
+const ApiVaultEntriesRouteWithChildren = ApiVaultEntriesRoute._addFileChildren(
+  ApiVaultEntriesRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
@@ -1676,6 +1903,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiPlanActivitiesRoute: ApiPlanActivitiesRouteWithChildren,
   ApiPlanCategoriesRoute: ApiPlanCategoriesRouteWithChildren,
   ApiPlanFocusSessionsRoute: ApiPlanFocusSessionsRoute,
+  ApiVaultDocumentsRoute: ApiVaultDocumentsRouteWithChildren,
+  ApiVaultEntriesRoute: ApiVaultEntriesRouteWithChildren,
+  ApiVaultMetaRoute: ApiVaultMetaRoute,
+  ApiVaultPasswordRoute: ApiVaultPasswordRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
