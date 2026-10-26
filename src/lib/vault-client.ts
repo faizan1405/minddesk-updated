@@ -107,6 +107,10 @@ export async function fetchVaultDocuments(): Promise<EncryptedDocumentDto[]> {
   return api<EncryptedDocumentDto[]>("/api/vault/documents");
 }
 
+export async function getVaultDocumentApi(id: string): Promise<EncryptedDocumentDto> {
+  return api<EncryptedDocumentDto>(`/api/vault/documents/${id}`);
+}
+
 export async function createVaultDocumentApi(data: {
   id?: string;
   encrypted_data: string;

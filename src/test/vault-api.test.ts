@@ -323,6 +323,59 @@ describe("My Private Vault API Endpoints", () => {
       expect(json.attachments).toEqual([]);
     });
 
+    it("fetches single document by ID with attachments and validates tenancy", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: validDocumentUuid,
+            userId: mockUser.id,
+            encryptedData: "docMetaCiphertext",
+            iv: "dGVzdGl2YmFzZTY0Cg==",
+            version: 2,
+            createdAt: new Date("2026-01-01T00:00:00Z"),
+            updatedAt: new Date("2026-01-02T00:00:00Z"),
+            attachments: [
+              {
+                id: validAttachmentUuid,
+                encryptedSize: 1024,
+                iv: "attachmentIv",
+                createdAt: new Date("2026-01-01T00:00:00Z"),
+              },
+            ],
+          }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultDocumentItemRoute.options as any).server.handlers;
+      const req = new Request(`http://localhost/api/vault/documents/${validDocumentUuid}`);
+      const res = await handlers.GET({ request: req, params: { id: validDocumentUuid } });
+      const json = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(json.id).toBe(validDocumentUuid);
+      expect(json.version).toBe(2);
+      expect(json.attachments).toHaveLength(1);
+      expect(json.attachments[0].id).toBe(validAttachmentUuid);
+    });
+
+    it("returns 404 when fetching document that does not exist", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          findFirst: vi.fn().mockResolvedValue(null),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultDocumentItemRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/documents/non-existent-id");
+      const res = await handlers.GET({ request: req, params: { id: "non-existent-id" } });
+
+      expect(res.status).toBe(404);
+    });
+
     it("downloads encrypted attachment stream with private no-cache headers", async () => {
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
       vi.spyOn(vaultStorage, "readEncryptedAttachmentFile").mockResolvedValue({

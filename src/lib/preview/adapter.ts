@@ -187,7 +187,6 @@ function handlePreviewRequest(
 
   const id = p[2] ?? "";
 
-
   // ---- vault ----
   if (route === "GET /vault/meta") {
     if (!db.vaultMeta) {
@@ -228,7 +227,7 @@ function handlePreviewRequest(
     db.vaultMeta["salt"] = b["salt"];
     db.vaultMeta["wrapped_key"] = b["wrapped_key"];
     db.vaultMeta["wrapped_key_iv"] = b["wrapped_key_iv"];
-    db.vaultMeta["version"] = (((db.vaultMeta["version"] as number) || 1) + 1);
+    db.vaultMeta["version"] = ((db.vaultMeta["version"] as number) || 1) + 1;
     db.vaultMeta["updated_at"] = now();
     return ok({ success: true, version: db.vaultMeta["version"] });
   }
@@ -257,7 +256,7 @@ function handlePreviewRequest(
     touch(e, {
       encrypted_data: b["encrypted_data"],
       iv: b["iv"],
-      version: (((e["version"] as number) || 1) + 1),
+      version: ((e["version"] as number) || 1) + 1,
     });
     return ok(e);
   }
@@ -267,6 +266,11 @@ function handlePreviewRequest(
   }
   if (route === "GET /vault/documents") {
     return ok(db.vaultDocuments);
+  }
+  if (route === "GET /vault/documents/:x") {
+    const d = find(db.vaultDocuments, id);
+    if (!d) return err(404, "Vault document not found");
+    return ok(d);
   }
   if (route === "POST /vault/documents") {
     const r = {
@@ -299,7 +303,7 @@ function handlePreviewRequest(
     touch(d, {
       encrypted_data: b["encrypted_data"],
       iv: b["iv"],
-      version: (((d["version"] as number) || 1) + 1),
+      version: ((d["version"] as number) || 1) + 1,
     });
     return ok(d);
   }

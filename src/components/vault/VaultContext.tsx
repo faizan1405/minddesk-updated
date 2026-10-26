@@ -25,6 +25,7 @@ import {
   updateVaultEntryApi,
   deleteVaultEntryApi,
   fetchVaultDocuments,
+  getVaultDocumentApi,
   createVaultDocumentApi,
   updateVaultDocumentApi,
   deleteVaultDocumentApi,
@@ -32,9 +33,42 @@ import {
   deleteVaultAttachmentApi,
   type VaultMetaResponse,
   type EncryptedAttachmentDto,
+  type EncryptedDocumentDto,
 } from "@/lib/vault-client";
 import { useAuth } from "@/hooks/use-auth";
 import { readFileAsArrayBuffer } from "./DocumentDialog";
+
+export function isAmbiguousNetworkError(err: unknown): boolean {
+  if (!err) return false;
+  const status =
+    (err as { status?: number; statusCode?: number })?.status ??
+    (err as { status?: number; statusCode?: number })?.statusCode;
+  // If it's an explicit HTTP 4xx response, it was definitively rejected before commit
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return false;
+  }
+  if (err instanceof TypeError) return true; // Standard browser network fetch failure
+  if ((err as Error)?.name === "AbortError") return true;
+  const msg = ((err as Error)?.message || String(err)).toLowerCase();
+  if (
+    msg.includes("failed to fetch") ||
+    msg.includes("network") ||
+    msg.includes("timeout") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("abort") ||
+    msg.includes("load failed") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504")
+  ) {
+    return true;
+  }
+  if (typeof status === "number" && status >= 500) {
+    return true;
+  }
+  return false;
+}
 
 export interface DecryptedPasswordItem {
   id: string;
@@ -613,7 +647,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     toast.success("Password entry deleted.");
   }, []);
 
-  // Save (Create or Edit) Document with correct upload order, rollback, and attachment lifecycle
+  // Save (Create or Edit) Document with correct upload order, recoverable network failure handling, and safe attachment lifecycle
   const saveDocument = useCallback(
     async (
       meta: DocumentMetadata,
@@ -647,16 +681,31 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           throw new Error("Vault locked during document creation.");
         }
 
-        const createdDoc = await createVaultDocumentApi({
-          id: docId,
-          encrypted_data: initialEncrypted.ciphertext,
-          iv: initialEncrypted.iv,
-        });
-
+        let createdDoc: EncryptedDocumentDto;
         try {
-          const uploadedAttachmentsMeta: DocumentAttachmentMeta[] = [];
+          createdDoc = await createVaultDocumentApi({
+            id: docId,
+            encrypted_data: initialEncrypted.ciphertext,
+            iv: initialEncrypted.iv,
+          });
+        } catch (createErr) {
+          // If creation request failed, verify if it was an ambiguous network error
+          if (isAmbiguousNetworkError(createErr)) {
+            try {
+              createdDoc = await getVaultDocumentApi(docId);
+            } catch {
+              // Could not confirm creation; no attachments were uploaded yet, safe to reject
+              throw createErr;
+            }
+          } else {
+            throw createErr;
+          }
+        }
 
-          // 2. Upload attachments (if any)
+        const uploadedAttachmentsMeta: DocumentAttachmentMeta[] = [];
+
+        // 2. Upload attachments (if any)
+        try {
           if (newFiles && newFiles.length > 0) {
             for (const item of newFiles) {
               if (unlockGenerationRef.current !== gen) {
@@ -688,61 +737,146 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
               });
             }
           }
-
-          // 3. Update document with complete manifest
-          const finalMeta: DocumentMetadata = {
-            ...meta,
-            attachments: uploadedAttachmentsMeta,
-          };
-
-          const finalEncrypted = await encryptDocumentMeta(
-            finalMeta,
-            docMetaKeyRef.current,
-            docId,
-            user.id,
+        } catch (uploadErr) {
+          // Attachment upload failed BEFORE manifest finalization was attempted.
+          // This is a confirmed failure prior to commit: clean up uploaded files and delete document record
+          console.error(
+            "[vault] Attachment upload failed during creation, rolling back:",
+            uploadErr,
           );
-
-          if (unlockGenerationRef.current !== gen) {
-            throw new Error("Vault locked during manifest finalization.");
-          }
-
-          const updated = await updateVaultDocumentApi(docId, {
-            encrypted_data: finalEncrypted.ciphertext,
-            iv: finalEncrypted.iv,
-            expected_version: createdDoc.version,
-          });
-
-          if (unlockGenerationRef.current !== gen) return;
-
-          setDocuments((prev) => [
-            {
-              id: docId,
-              version: updated.version,
-              createdAt: createdDoc.created_at,
-              updatedAt: updated.updated_at,
-              data: finalMeta,
-              attachments: updated.attachments,
-            },
-            ...prev,
-          ]);
-          toast.success("Document saved to keeper.");
-        } catch (err) {
-          // P0 ROLLBACK ON PARTIAL FAILURE: Clean up uploaded files and delete document record
-          console.error("[vault] Document creation failed midway, rolling back:", err);
           for (const attId of uploadedAttIds) {
             try {
               await deleteVaultAttachmentApi(attId);
             } catch {
-              // Best-effort rollback
+              // Best-effort
             }
           }
           try {
             await deleteVaultDocumentApi(docId);
           } catch {
-            // Best-effort rollback
+            // Best-effort
           }
-          throw err;
+          throw uploadErr;
         }
+
+        // 3. Finalize manifest
+        const finalMeta: DocumentMetadata = {
+          ...meta,
+          attachments: uploadedAttachmentsMeta,
+        };
+
+        const finalEncrypted = await encryptDocumentMeta(
+          finalMeta,
+          docMetaKeyRef.current,
+          docId,
+          user.id,
+        );
+
+        if (unlockGenerationRef.current !== gen) {
+          // Vault locked before commit: clean up uncommitted files
+          for (const attId of uploadedAttIds) {
+            try {
+              await deleteVaultAttachmentApi(attId);
+            } catch {
+              // Best-effort
+            }
+          }
+          try {
+            await deleteVaultDocumentApi(docId);
+          } catch {
+            // Best-effort
+          }
+          throw new Error("Vault locked during manifest finalization.");
+        }
+
+        let updated: EncryptedDocumentDto;
+        try {
+          updated = await updateVaultDocumentApi(docId, {
+            encrypted_data: finalEncrypted.ciphertext,
+            iv: finalEncrypted.iv,
+            expected_version: createdDoc.version,
+          });
+        } catch (commitErr) {
+          // Check if the commit actually succeeded on the server before response was lost!
+          if (isAmbiguousNetworkError(commitErr)) {
+            try {
+              const serverDoc = await getVaultDocumentApi(docId);
+              if (
+                serverDoc.version > createdDoc.version ||
+                serverDoc.encrypted_data === finalEncrypted.ciphertext
+              ) {
+                // Succeeded on server despite lost response!
+                updated = serverDoc;
+              } else {
+                // Server confirmed document was NOT updated to final manifest. Safe to roll back.
+                for (const attId of uploadedAttIds) {
+                  try {
+                    await deleteVaultAttachmentApi(attId);
+                  } catch {
+                    // Best-effort
+                  }
+                }
+                try {
+                  await deleteVaultDocumentApi(docId);
+                } catch {
+                  // Best-effort
+                }
+                throw new Error(
+                  "Network connection dropped while saving document manifest. Operation safely rolled back.",
+                );
+              }
+            } catch (recoveryErr) {
+              if (
+                recoveryErr instanceof Error &&
+                recoveryErr.message.includes("safely rolled back")
+              ) {
+                throw recoveryErr;
+              }
+              // Recovery query could NOT reach server (e.g. offline).
+              // NEVER perform destructive rollback when outcome is unconfirmed!
+              console.warn(
+                "[vault] Network lost after document commit attempt. Preserving files without rollback.",
+                recoveryErr,
+              );
+              toast.error(
+                "Network interrupted while finalizing document. Your files are preserved safely on the server. Please check your connection and refresh.",
+              );
+              throw new Error(
+                "NETWORK_AMBIGUOUS_COMMIT: Document status could not be verified due to network interruption. Files have been preserved.",
+              );
+            }
+          } else {
+            // Confirmed rejection by server (e.g. 409 Conflict, 400 Bad Request)
+            for (const attId of uploadedAttIds) {
+              try {
+                await deleteVaultAttachmentApi(attId);
+              } catch {
+                // Best-effort
+              }
+            }
+            try {
+              await deleteVaultDocumentApi(docId);
+            } catch {
+              // Best-effort
+            }
+            throw commitErr;
+          }
+        }
+
+        if (unlockGenerationRef.current !== gen) return;
+
+        setDocuments((prev) => [
+          {
+            id: docId,
+            version: updated.version,
+            createdAt: createdDoc.created_at,
+            updatedAt: updated.updated_at,
+            data: finalMeta,
+            attachments: updated.attachments,
+          },
+          ...prev,
+        ]);
+        toast.success("Document saved to keeper.");
         return;
       }
 
@@ -793,41 +927,133 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
             });
           }
         }
-
-        // 3. Encrypt updated document metadata including complete attachment manifest
-        const finalMeta: DocumentMetadata = {
-          ...meta,
-          attachments: updatedAttachments,
-        };
-
-        const encrypted = await encryptDocumentMeta(
-          finalMeta,
-          docMetaKeyRef.current,
-          docId,
-          user.id,
-        );
-
-        if (unlockGenerationRef.current !== gen) {
-          throw new Error("Vault locked during document update.");
+      } catch (uploadErr) {
+        // Confirmed upload failure BEFORE document metadata commit was attempted.
+        // Clean up newly uploaded files only. Existing attachments remain 100% untouched!
+        for (const attId of newlyUploadedAttIds) {
+          try {
+            await deleteVaultAttachmentApi(attId);
+          } catch {
+            // Best-effort rollback
+          }
         }
+        throw uploadErr;
+      }
 
-        // 4. ATOMIC METADATA COMMIT WITH POST-COMMIT RETIREMENT
-        // The server verifies expected_version, commits the new metadata, and ONLY THEN retires obsolete attachments!
-        const retainedAttachmentIds = updatedAttachments.map((a) => a.id);
-        const obsoleteAttachmentIds = removedAttachmentIds || [];
+      // 3. Encrypt updated document metadata including complete attachment manifest
+      const finalMeta: DocumentMetadata = {
+        ...meta,
+        attachments: updatedAttachments,
+      };
 
-        const updated = await updateVaultDocumentApi(id, {
+      const encrypted = await encryptDocumentMeta(finalMeta, docMetaKeyRef.current, docId, user.id);
+
+      if (unlockGenerationRef.current !== gen) {
+        for (const attId of newlyUploadedAttIds) {
+          try {
+            await deleteVaultAttachmentApi(attId);
+          } catch {
+            // Best-effort rollback
+          }
+        }
+        throw new Error("Vault locked during document update.");
+      }
+
+      // 4. ATOMIC METADATA COMMIT WITH POST-COMMIT RETIREMENT
+      // The server verifies expected_version, commits the new metadata, and ONLY THEN retires obsolete attachments!
+      const retainedAttachmentIds = updatedAttachments.map((a) => a.id);
+      const obsoleteAttachmentIds = removedAttachmentIds || [];
+      const currentExpectedVersion = expectedVersion ?? 1;
+
+      let updated: EncryptedDocumentDto;
+      try {
+        updated = await updateVaultDocumentApi(id, {
           encrypted_data: encrypted.ciphertext,
           iv: encrypted.iv,
-          expected_version: expectedVersion ?? 1,
+          expected_version: currentExpectedVersion,
           retained_attachment_ids: retainedAttachmentIds,
           obsolete_attachment_ids: obsoleteAttachmentIds,
         });
+      } catch (commitErr) {
+        if (isAmbiguousNetworkError(commitErr)) {
+          try {
+            const serverDoc = await getVaultDocumentApi(id);
+            if (
+              serverDoc.version > currentExpectedVersion &&
+              serverDoc.encrypted_data === encrypted.ciphertext
+            ) {
+              // The commit SUCCEEDED on the server despite the lost HTTP response!
+              updated = serverDoc;
+            } else if (serverDoc.version > currentExpectedVersion) {
+              // Another device committed changes concurrently!
+              for (const attId of newlyUploadedAttIds) {
+                try {
+                  await deleteVaultAttachmentApi(attId);
+                } catch {
+                  // Best-effort rollback
+                }
+              }
+              toast.error("Conflict: Document was modified by another session. Please reload.");
+              throw new Error("Conflict: Document was modified by another session. Please reload.");
+            } else {
+              // Version did not advance: metadata commit did NOT occur on the server.
+              // Safe to clean up newly uploaded attachments. Existing attachments were never touched!
+              for (const attId of newlyUploadedAttIds) {
+                try {
+                  await deleteVaultAttachmentApi(attId);
+                } catch {
+                  // Best-effort rollback
+                }
+              }
+              throw new Error(
+                "Network connection dropped before changes were committed. Please retry.",
+              );
+            }
+          } catch (recoveryErr) {
+            const recMsg = recoveryErr instanceof Error ? recoveryErr.message : "";
+            if (recMsg.includes("Conflict") || recMsg.includes("dropped before changes")) {
+              throw recoveryErr;
+            }
+            // Recovery query itself could NOT reach server (e.g. offline / DNS failure)
+            // CRITICAL: NEVER destroy newlyUploadedAttIds or existing attachments!
+            console.warn(
+              "[vault] Network lost during document update. Preserving files without rollback.",
+              recoveryErr,
+            );
+            toast.error(
+              "Network interrupted while updating document. Your uploaded attachments have been safely preserved. Please check your connection and reload.",
+            );
+            throw new Error(
+              "NETWORK_AMBIGUOUS_COMMIT: Document commit status is unconfirmed due to network interruption. Files have been preserved.",
+            );
+          }
+        } else {
+          // Confirmed rejection by server (e.g. 409 Conflict, 400 Bad Request)
+          for (const attId of newlyUploadedAttIds) {
+            try {
+              await deleteVaultAttachmentApi(attId);
+            } catch {
+              // Best-effort rollback
+            }
+          }
+          const errorObj = commitErr as { status?: number; message?: string };
+          if (
+            errorObj?.status === 409 ||
+            errorObj?.message?.includes("Conflict") ||
+            errorObj?.message?.includes("409")
+          ) {
+            toast.error("Conflict: Document was modified by another session. Please reload.");
+          }
+          throw commitErr;
+        }
+      }
 
-        if (unlockGenerationRef.current !== gen) return;
+      if (unlockGenerationRef.current !== gen) return;
 
-        setDocuments((prev) =>
-          prev.map((d) =>
+      setDocuments((prev) => {
+        const exists = prev.some((d) => d.id === id);
+        if (exists) {
+          return prev.map((d) =>
             d.id === id
               ? {
                   id,
@@ -838,30 +1064,21 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
                   attachments: updated.attachments,
                 }
               : d,
-          ),
-        );
-        toast.success("Document updated.");
-      } catch (err: unknown) {
-        // Rollback newly uploaded attachments on error.
-        // Existing attachments were NEVER deleted and remain 100% intact!
-        for (const attId of newlyUploadedAttIds) {
-          try {
-            await deleteVaultAttachmentApi(attId);
-          } catch {
-            // Best-effort rollback
-          }
+          );
         }
-
-        const errorObj = err as { status?: number; message?: string };
-        if (
-          errorObj?.status === 409 ||
-          errorObj?.message?.includes("Conflict") ||
-          errorObj?.message?.includes("409")
-        ) {
-          toast.error("Conflict: Document was modified by another session. Please reload.");
-        }
-        throw err;
-      }
+        return [
+          {
+            id,
+            version: updated.version,
+            createdAt: updated.created_at,
+            updatedAt: updated.updated_at,
+            data: finalMeta,
+            attachments: updated.attachments,
+          },
+          ...prev,
+        ];
+      });
+      toast.success("Document updated.");
     },
     [user],
   );

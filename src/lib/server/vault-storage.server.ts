@@ -94,6 +94,15 @@ export async function saveEncryptedAttachmentFile(
   } catch (err: unknown) {
     if ((err as NodeJS.ErrnoException)?.code === "EEXIST") {
       // Check for safe idempotent retry: exact same attachment uploaded previously
+      // Verify byte-for-byte content integrity of the existing file on disk
+      const diskBytes = await readFile(filePath);
+      if (!diskBytes.equals(encryptedBuffer)) {
+        throw new ApiError(
+          409,
+          "Attachment file with this ID already exists on storage with differing content. Existing attachment cannot be overwritten.",
+        );
+      }
+
       const prisma = db();
       const existing = await prisma.vaultDocumentAttachment.findFirst({
         where: { id: attachmentId, documentId, userId },
@@ -106,7 +115,10 @@ export async function saveEncryptedAttachmentFile(
           iv: existing.iv,
         };
       }
-      throw new ApiError(409, "Attachment file with this ID already exists on storage.");
+      throw new ApiError(
+        409,
+        "Attachment file with this ID already exists on storage with conflicting metadata.",
+      );
     }
     throw err;
   }
@@ -202,29 +214,53 @@ export async function deleteEncryptedAttachmentFile(
   });
 }
 
+export interface ReconcileStorageOptions {
+  olderThanMs?: number;
+  dryRun?: boolean;
+}
+
+export interface ReconcileStorageResult {
+  scannedFiles: number;
+  candidates: string[];
+  cleanedFiles: number;
+  dryRun: boolean;
+}
+
 /**
  * Safely reconciles abandoned storage files.
  * Rules:
  * 1. Scans storage directory for .enc files.
  * 2. Compares against vault_document_attachments database records.
- * 3. Only removes .enc files on disk if:
- *    a) No matching database record exists for that attachment ID, AND
- *    b) File was created more than olderThanMs ago (grace period for active in-flight uploads).
- * 4. NEVER deletes an active or valid document attachment!
+ * 3. In dryRun mode, identifies candidates without unlinking.
+ * 4. Only removes .enc files on disk if:
+ *    a) dryRun is false, AND
+ *    b) No matching database record exists for that attachment ID, AND
+ *    c) File modification timestamp is older than olderThanMs ago (grace period).
+ * 5. NEVER deletes an active or valid document attachment!
  */
 export async function reconcileAbandonedVaultStorage(
-  olderThanMs: number = 2 * 60 * 60 * 1000,
-): Promise<{ scannedFiles: number; cleanedFiles: number }> {
+  options?: ReconcileStorageOptions | number,
+): Promise<ReconcileStorageResult> {
+  const olderThanMs =
+    typeof options === "number" ? options : (options?.olderThanMs ?? 2 * 60 * 60 * 1000);
+  const dryRun =
+    typeof options === "object" && options.dryRun !== undefined
+      ? options.dryRun
+      : typeof options === "number"
+        ? false
+        : false;
+
   const { readdir, stat } = await import("node:fs/promises");
   const storageDir = getVaultStorageDir();
   if (!existsSync(storageDir)) {
-    return { scannedFiles: 0, cleanedFiles: 0 };
+    return { scannedFiles: 0, candidates: [], cleanedFiles: 0, dryRun };
   }
 
   const files = await readdir(storageDir);
   const prisma = db();
   let scannedFiles = 0;
   let cleanedFiles = 0;
+  const candidates: string[] = [];
   const now = Date.now();
 
   for (const fileName of files) {
@@ -249,13 +285,16 @@ export async function reconcileAbandonedVaultStorage(
       });
 
       if (!record) {
-        await unlink(filePath);
-        cleanedFiles++;
+        candidates.push(fileName);
+        if (!dryRun) {
+          await unlink(filePath);
+          cleanedFiles++;
+        }
       }
     } catch {
       // Best-effort
     }
   }
 
-  return { scannedFiles, cleanedFiles };
+  return { scannedFiles, candidates, cleanedFiles, dryRun };
 }

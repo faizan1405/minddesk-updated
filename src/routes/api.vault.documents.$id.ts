@@ -12,6 +12,45 @@ const UpdateInput = z.object({
 export const Route = createFileRoute("/api/vault/documents/$id")({
   server: {
     handlers: {
+      GET: async ({ request, params }) => {
+        const api = await import("@/lib/server/api.server");
+        return api.handle(async () => {
+          const user = await api.requireUser(request);
+          const doc = await api.db().vaultDocument.findFirst({
+            where: { id: params.id, userId: user.id },
+            include: {
+              attachments: {
+                select: {
+                  id: true,
+                  encryptedSize: true,
+                  iv: true,
+                  createdAt: true,
+                },
+              },
+            },
+          });
+
+          if (!doc) {
+            throw new api.ApiError(404, "Document not found");
+          }
+
+          return api.json({
+            id: doc.id,
+            encrypted_data: doc.encryptedData,
+            iv: doc.iv,
+            version: doc.version,
+            created_at: doc.createdAt.toISOString(),
+            updated_at: doc.updatedAt.toISOString(),
+            attachments: doc.attachments.map((a) => ({
+              id: a.id,
+              encrypted_size: a.encryptedSize,
+              iv: a.iv,
+              created_at: a.createdAt.toISOString(),
+            })),
+          });
+        });
+      },
+
       PATCH: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
         const vaultStorage = await import("@/lib/server/vault-storage.server");

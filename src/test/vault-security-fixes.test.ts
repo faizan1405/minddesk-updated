@@ -155,6 +155,28 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       expect(result.iv).toBe("matchingIv123456");
     });
 
+    it("rejects duplicate attachment retry if existing disk file has differing ciphertext bytes", async () => {
+      const existingFile = join(tempDir, `${validAttId}.enc`);
+      const originalBytes = Buffer.from("original-encrypted-ciphertext-bytes-001");
+      await writeFile(existingFile, originalBytes);
+
+      const differingBytes = Buffer.from("differing-encrypted-ciphertext-bytes-999");
+
+      await expect(
+        vaultStorage.saveEncryptedAttachmentFile(
+          mockUser.id,
+          validDocId,
+          validAttId,
+          differingBytes,
+          "matchingIv123456",
+        ),
+      ).rejects.toThrow(/differing content/);
+
+      // Verify original file on disk was NOT overwritten or modified
+      const diskContent = await readFile(existingFile);
+      expect(diskContent.equals(originalBytes)).toBe(true);
+    });
+
     it("safely unlinks only newly created file when database insert fails", async () => {
       const mockPrisma = {
         vaultDocumentAttachment: {
@@ -217,6 +239,43 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
       // Active file MUST remain on disk!
       expect(await readFile(activeFile, "utf8")).toBe("active-file-data");
       // Abandoned unreferenced file was cleaned up
+      await expect(readFile(abandonedFile)).rejects.toThrow();
+    });
+
+    it("safely reports candidate abandoned files in dry-run mode without deleting them", async () => {
+      const { utimes } = await import("node:fs/promises");
+      const abandonedFile = join(tempDir, `${validAttId}.enc`);
+      await writeFile(abandonedFile, Buffer.from("unreferenced-dry-run-file"));
+
+      const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      await utimes(abandonedFile, threeHoursAgo, threeHoursAgo);
+
+      const mockPrisma = {
+        vaultDocumentAttachment: {
+          findUnique: vi.fn().mockResolvedValue(null),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+
+      // 1. Dry-run mode: should report candidates but NOT unlink
+      const dryRunRes = await vaultStorage.reconcileAbandonedVaultStorage({
+        dryRun: true,
+        olderThanMs: 2 * 60 * 60 * 1000,
+      });
+      expect(dryRunRes.dryRun).toBe(true);
+      expect(dryRunRes.scannedFiles).toBe(1);
+      expect(dryRunRes.candidates).toContain(`${validAttId}.enc`);
+      expect(dryRunRes.cleanedFiles).toBe(0);
+
+      // Verify file STILL exists on disk!
+      expect(await readFile(abandonedFile, "utf8")).toBe("unreferenced-dry-run-file");
+
+      // 2. Execute mode: should actually unlink
+      const liveRes = await vaultStorage.reconcileAbandonedVaultStorage({
+        dryRun: false,
+        olderThanMs: 2 * 60 * 60 * 1000,
+      });
+      expect(liveRes.cleanedFiles).toBe(1);
       await expect(readFile(abandonedFile)).rejects.toThrow();
     });
   });

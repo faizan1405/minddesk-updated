@@ -561,4 +561,288 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
     expect(vault.current.status).toBe("locked");
     expect(vault.current.passwords).toEqual([]);
   });
+
+  // -------------------------------------------------------------------------
+  // AMBIGUOUS NETWORK FAILURE RECOVERY & CONCURRENCY
+  // -------------------------------------------------------------------------
+  describe("Ambiguous Network Failure Recovery & Concurrency Safety", () => {
+    it("recovers cleanly from lost HTTP response on document creation when server actually committed", async () => {
+      const vault = await setupUnlockedVault();
+
+      const createdDocId = "doc_create_network_lost";
+      let capturedCiphertext = "";
+
+      vi.spyOn(vaultClient, "createVaultDocumentApi").mockResolvedValue({
+        id: createdDocId,
+        encrypted_data: "initial_ciphertext",
+        iv: "initial_iv",
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attachments: [],
+      });
+
+      vi.spyOn(vaultClient, "uploadVaultAttachmentApi").mockResolvedValue({
+        id: "att_doc_1",
+        encrypted_size: 512,
+        iv: "iv",
+      });
+
+      // Simulate network dropping after server commit
+      vi.spyOn(vaultClient, "updateVaultDocumentApi").mockImplementation(async (_id, data) => {
+        capturedCiphertext = data.encrypted_data;
+        throw new TypeError("Failed to fetch"); // Network lost while waiting for response
+      });
+
+      // Server query confirms version 2 was actually committed on server
+      vi.spyOn(vaultClient, "getVaultDocumentApi").mockImplementation(async () => ({
+        id: createdDocId,
+        encrypted_data: capturedCiphertext,
+        iv: "committed_iv",
+        version: 2,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attachments: [
+          { id: "att_doc_1", encrypted_size: 512, iv: "iv", created_at: new Date().toISOString() },
+        ],
+      }));
+
+      const deleteAttSpy = vi.spyOn(vaultClient, "deleteVaultAttachmentApi");
+      const deleteDocSpy = vi.spyOn(vaultClient, "deleteVaultDocumentApi");
+
+      const file = new File([new Uint8Array([1, 2, 3])], "test.pdf", { type: "application/pdf" });
+
+      await act(async () => {
+        await vault.current.saveDocument(
+          {
+            title: "Network Recovered Document",
+            category: "General",
+            notes: "",
+            attachments: [],
+          },
+          undefined, // create
+          [{ label: "Test Attachment", file }],
+        );
+      });
+
+      // Succeeded via recovery!
+      expect(vault.current.documents.length).toBe(1);
+      expect(vault.current.documents[0]!.version).toBe(2);
+      expect(vault.current.documents[0]!.data.title).toBe("Network Recovered Document");
+
+      // Destructive rollback MUST NOT have occurred!
+      expect(deleteAttSpy).not.toHaveBeenCalled();
+      expect(deleteDocSpy).not.toHaveBeenCalled();
+    });
+
+    it("preserves files and does NOT perform destructive rollback on ambiguous network failure during document creation when server status cannot be confirmed", async () => {
+      const vault = await setupUnlockedVault();
+
+      const createdDocId = "doc_create_offline";
+      vi.spyOn(vaultClient, "createVaultDocumentApi").mockResolvedValue({
+        id: createdDocId,
+        encrypted_data: "initial_ciphertext",
+        iv: "initial_iv",
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attachments: [],
+      });
+
+      vi.spyOn(vaultClient, "uploadVaultAttachmentApi").mockResolvedValue({
+        id: "att_doc_offline",
+        encrypted_size: 512,
+        iv: "iv",
+      });
+
+      // Manifest update fails with network error
+      vi.spyOn(vaultClient, "updateVaultDocumentApi").mockRejectedValue(
+        new TypeError("Failed to fetch"),
+      );
+      // Verification query also fails (client is offline)
+      vi.spyOn(vaultClient, "getVaultDocumentApi").mockRejectedValue(
+        new TypeError("Failed to fetch"),
+      );
+
+      const deleteAttSpy = vi.spyOn(vaultClient, "deleteVaultAttachmentApi");
+      const deleteDocSpy = vi.spyOn(vaultClient, "deleteVaultDocumentApi");
+
+      const file = new File([new Uint8Array([1, 2, 3])], "test.pdf", { type: "application/pdf" });
+
+      await expect(
+        act(async () => {
+          await vault.current.saveDocument(
+            {
+              title: "Offline Preserved Document",
+              category: "General",
+              notes: "",
+              attachments: [],
+            },
+            undefined,
+            [{ label: "Attachment", file }],
+          );
+        }),
+      ).rejects.toThrow(/NETWORK_AMBIGUOUS_COMMIT/);
+
+      // Files MUST be preserved safely on the server without destructive rollback!
+      expect(deleteAttSpy).not.toHaveBeenCalled();
+      expect(deleteDocSpy).not.toHaveBeenCalled();
+    });
+
+    it("recovers cleanly from lost HTTP response on document edit when server actually committed", async () => {
+      const vault = await setupUnlockedVault();
+
+      const docId = "doc_edit_network_lost";
+      let capturedCiphertext = "";
+
+      vi.spyOn(vaultClient, "uploadVaultAttachmentApi").mockResolvedValue({
+        id: "att_new_edit_1",
+        encrypted_size: 1024,
+        iv: "iv",
+      });
+
+      vi.spyOn(vaultClient, "updateVaultDocumentApi").mockImplementation(async (_id, data) => {
+        capturedCiphertext = data.encrypted_data;
+        throw new TypeError("Failed to fetch"); // Lost response
+      });
+
+      vi.spyOn(vaultClient, "getVaultDocumentApi").mockImplementation(async () => ({
+        id: docId,
+        encrypted_data: capturedCiphertext,
+        iv: "committed_iv",
+        version: 3,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        attachments: [
+          {
+            id: "att_existing_1",
+            encrypted_size: 100,
+            iv: "iv",
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: "att_new_edit_1",
+            encrypted_size: 1024,
+            iv: "iv",
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }));
+
+      const deleteAttSpy = vi.spyOn(vaultClient, "deleteVaultAttachmentApi");
+      const newFile = new File([new Uint8Array([1, 2, 3])], "new.pdf", { type: "application/pdf" });
+
+      await act(async () => {
+        await vault.current.saveDocument(
+          {
+            title: "Updated Title",
+            category: "General",
+            notes: "",
+            attachments: [
+              {
+                id: "att_existing_1",
+                label: "Existing",
+                fileName: "e.pdf",
+                fileSize: 100,
+                mimeType: "application/pdf",
+                iv: "iv",
+              },
+            ],
+          },
+          docId,
+          [{ label: "New Att", file: newFile }],
+          [], // no removals
+          2, // expected version
+        );
+      });
+
+      // State is recovered cleanly with version 3
+      expect(vault.current.documents.find((d) => d.id === docId)?.version).toBe(3);
+      // Newly uploaded attachment was NOT rolled back
+      expect(deleteAttSpy).not.toHaveBeenCalled();
+    });
+
+    it("preserves files and does NOT perform destructive rollback on ambiguous network failure during document edit when server status cannot be confirmed", async () => {
+      const vault = await setupUnlockedVault();
+
+      const docId = "doc_edit_offline";
+      vi.spyOn(vaultClient, "uploadVaultAttachmentApi").mockResolvedValue({
+        id: "att_new_edit_offline",
+        encrypted_size: 1024,
+        iv: "iv",
+      });
+
+      vi.spyOn(vaultClient, "updateVaultDocumentApi").mockRejectedValue(
+        new TypeError("Failed to fetch"),
+      );
+      vi.spyOn(vaultClient, "getVaultDocumentApi").mockRejectedValue(
+        new TypeError("Failed to fetch"),
+      );
+
+      const deleteAttSpy = vi.spyOn(vaultClient, "deleteVaultAttachmentApi");
+      const newFile = new File([new Uint8Array([1, 2, 3])], "new.pdf", { type: "application/pdf" });
+
+      await expect(
+        act(async () => {
+          await vault.current.saveDocument(
+            {
+              title: "Edit Offline",
+              category: "General",
+              notes: "",
+              attachments: [],
+            },
+            docId,
+            [{ label: "New Att", file: newFile }],
+            [],
+            2,
+          );
+        }),
+      ).rejects.toThrow(/NETWORK_AMBIGUOUS_COMMIT/);
+
+      // Critical: files are preserved!
+      expect(deleteAttSpy).not.toHaveBeenCalled();
+    });
+
+    it("handles concurrent edits from another device during document edit and rejects with 409 conflict", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "uploadVaultAttachmentApi").mockResolvedValue({
+        id: "att_new_conflict",
+        encrypted_size: 512,
+        iv: "iv",
+      });
+
+      const deleteAttSpy = vi.spyOn(vaultClient, "deleteVaultAttachmentApi").mockResolvedValue({
+        success: true,
+        id: "att_new_conflict",
+      });
+
+      vi.spyOn(vaultClient, "updateVaultDocumentApi").mockRejectedValue({
+        status: 409,
+        message: "Conflict: Document was modified by another session. Please reload.",
+      });
+
+      const newFile = new File([new Uint8Array([1, 2, 3])], "new.pdf", { type: "application/pdf" });
+
+      await expect(
+        act(async () => {
+          await vault.current.saveDocument(
+            {
+              title: "Conflicted Doc",
+              category: "General",
+              notes: "",
+              attachments: [],
+            },
+            "doc_conflict",
+            [{ label: "New", file: newFile }],
+            [],
+            1,
+          );
+        }),
+      ).rejects.toMatchObject({ status: 409 });
+
+      // Unreferenced new upload was cleaned up, existing doc was not corrupted
+      expect(deleteAttSpy).toHaveBeenCalledWith(expect.any(String));
+    });
+  });
 });
