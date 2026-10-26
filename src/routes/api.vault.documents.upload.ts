@@ -9,7 +9,48 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
         return api.handle(async () => {
           const user = await api.requireUser(request);
 
-          const formData = await request.formData().catch(() => {
+          // P1: Upfront Content-Length check before buffering body
+          const MAX_UPLOAD_REQUEST_BYTES =
+            vaultStorage.MAX_VAULT_ATTACHMENT_BYTES + 64 * 1024; // 25 MB + 64 KB multipart overhead
+          const contentLengthHeader = request.headers.get("content-length");
+          if (contentLengthHeader) {
+            const contentLength = parseInt(contentLengthHeader, 10);
+            if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_REQUEST_BYTES) {
+              throw new api.ApiError(413, "Payload Too Large: Upload request exceeds 25 MB limit.");
+            }
+          }
+
+          // P1: Bounded streaming guard against unbounded chunked bodies
+          let reqToParse: Request = request;
+          if (request.body && typeof request.body.pipeThrough === "function") {
+            let bytesRead = 0;
+            const boundedStream = new TransformStream<Uint8Array, Uint8Array>({
+              transform(chunk, controller) {
+                bytesRead += chunk.byteLength;
+                if (bytesRead > MAX_UPLOAD_REQUEST_BYTES) {
+                  controller.error(
+                    new api.ApiError(413, "Payload Too Large: Upload stream exceeds 25 MB limit."),
+                  );
+                  return;
+                }
+                controller.enqueue(chunk);
+              },
+            });
+
+            reqToParse = new Request(request.url, {
+              method: request.method,
+              headers: request.headers,
+              body: request.body.pipeThrough(boundedStream),
+              // @ts-expect-error duplex is required in node environment when body is stream
+              duplex: "half",
+            });
+          }
+
+          const formData = await reqToParse.formData().catch((err: any) => {
+            if (err instanceof api.ApiError) throw err;
+            if (err?.status === 413 || err?.statusCode === 413) {
+              throw new api.ApiError(413, "Payload Too Large: Upload exceeds 25 MB limit.");
+            }
             throw new api.ApiError(400, "Invalid form data in upload request.");
           });
 
@@ -19,7 +60,21 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
           const fileEntry = formData.get("file");
 
           if (!documentId || !attachmentId || !iv || !fileEntry || typeof fileEntry === "string") {
-            throw new api.ApiError(400, "Missing required upload parameters (document_id, attachment_id, iv, file).");
+            throw new api.ApiError(
+              400,
+              "Missing required upload parameters (document_id, attachment_id, iv, file).",
+            );
+          }
+
+          // P0: Strict UUID validation on both documentId and attachmentId
+          if (!vaultStorage.isValidUuid(documentId)) {
+            throw new api.ApiError(400, "Invalid document_id: must be a valid UUID.");
+          }
+          if (!vaultStorage.isValidUuid(attachmentId)) {
+            throw new api.ApiError(400, "Invalid attachment_id: must be a valid UUID.");
+          }
+          if (typeof iv !== "string" || iv.length < 12 || iv.length > 64) {
+            throw new api.ApiError(400, "Invalid IV: must be between 12 and 64 characters.");
           }
 
           // Verify document ownership
@@ -36,6 +91,10 @@ export const Route = createFileRoute("/api/vault/documents/upload")({
 
           if (buffer.length === 0) {
             throw new api.ApiError(400, "Uploaded encrypted file is empty.");
+          }
+
+          if (buffer.length > vaultStorage.MAX_VAULT_ATTACHMENT_BYTES) {
+            throw new api.ApiError(413, "Payload Too Large: Encrypted attachment exceeds 25 MB limit.");
           }
 
           const saved = await vaultStorage.saveEncryptedAttachmentFile(

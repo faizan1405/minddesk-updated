@@ -29,10 +29,12 @@ import {
   updateVaultDocumentApi,
   deleteVaultDocumentApi,
   uploadVaultAttachmentApi,
+  deleteVaultAttachmentApi,
   type VaultMetaResponse,
   type EncryptedAttachmentDto,
 } from "@/lib/vault-client";
 import { useAuth } from "@/hooks/use-auth";
+import { readFileAsArrayBuffer } from "./DocumentDialog";
 
 export interface DecryptedPasswordItem {
   id: string;
@@ -73,7 +75,11 @@ interface VaultContextType {
   changeMasterPassword: (newPassword: string) => Promise<void>;
 
   // Password operations
-  savePassword: (data: PasswordEntryData, id?: string) => Promise<void>;
+  savePassword: (
+    data: PasswordEntryData,
+    id?: string,
+    expectedVersion?: number,
+  ) => Promise<void>;
   deletePassword: (id: string) => Promise<void>;
 
   // Document operations
@@ -81,6 +87,8 @@ interface VaultContextType {
     meta: DocumentMetadata,
     id?: string,
     newFiles?: Array<{ label: string; file: File }>,
+    removedAttachmentIds?: string[],
+    expectedVersion?: number,
   ) => Promise<void>;
   deleteDocument: (id: string) => Promise<void>;
 
@@ -92,6 +100,17 @@ const VaultContext = createContext<VaultContextType | null>(null);
 
 const DEFAULT_TIMEOUT_MINUTES = 5;
 
+/**
+ * Memory Key Management and Secure Erasure:
+ * In-memory root encryption key bytes are cleared by overwriting the backing Uint8Array with zeros
+ * via `rootKeyRef.current.fill(0)` and then nullifying references for garbage collection.
+ *
+ * LIMITATION NOTE:
+ * Due to JavaScript runtime engine specifications (V8 / browser JavaScript VMs), string primitives
+ * (passwords, base64 tokens) and intermediate CryptoKey internal states are immutable and handled
+ * by engine-managed memory pools. Complete, deterministic zeroing of low-level process RAM cannot
+ * be guaranteed in standard web runtimes until the engine executes garbage collection cycles.
+ */
 export function VaultProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [status, setStatus] = useState<VaultStatus>("loading");
@@ -101,6 +120,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const rootKeyRef = useRef<Uint8Array | null>(null);
   const passKeyRef = useRef<CryptoKey | null>(null);
   const docMetaKeyRef = useRef<CryptoKey | null>(null);
+
+  // P1: Unlock generation token to guard against race conditions and async leaks across lock/logout
+  const unlockGenerationRef = useRef<number>(0);
 
   // Decrypted records
   const [passwords, setPasswords] = useState<DecryptedPasswordItem[]>([]);
@@ -131,8 +153,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Securely clear memory keys
+  // Securely clear memory keys and invalidate in-flight async callbacks
   const purgeKeys = useCallback(() => {
+    unlockGenerationRef.current += 1;
     if (rootKeyRef.current) {
       rootKeyRef.current.fill(0);
       rootKeyRef.current = null;
@@ -141,6 +164,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     docMetaKeyRef.current = null;
     setPasswords([]);
     setDocuments([]);
+    setIsLoadingData(false);
   }, []);
 
   // Lock vault action
@@ -153,6 +177,16 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       // channel closed
     }
   }, [purgeKeys]);
+
+  // P1: Auto-lock and purge memory keys on user logout or session switch
+  const previousUserIdRef = useRef<string | undefined>(user?.id);
+  useEffect(() => {
+    if (previousUserIdRef.current && (!user || user.id !== previousUserIdRef.current)) {
+      purgeKeys();
+      setStatus(user ? "locked" : "loading");
+    }
+    previousUserIdRef.current = user?.id;
+  }, [user, purgeKeys]);
 
   // Initial load: check if vault is initialized
   useEffect(() => {
@@ -243,71 +277,89 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     };
   }, [status, timeoutMinutes, lockVault]);
 
-  // Decrypt all entries and documents upon unlock
-  const loadVaultData = useCallback(async (rootKeyBytes: Uint8Array, userId: string) => {
-    setIsLoadingData(true);
-    try {
-      const passKey = await getPasswordKey(rootKeyBytes);
-      const docMetaKey = await getDocumentMetaKey(rootKeyBytes);
-      passKeyRef.current = passKey;
-      docMetaKeyRef.current = docMetaKey;
+  // Decrypt all entries and documents upon unlock (with generation safety)
+  const loadVaultData = useCallback(
+    async (rootKeyBytes: Uint8Array, userId: string, generation: number) => {
+      setIsLoadingData(true);
+      try {
+        const passKey = await getPasswordKey(rootKeyBytes);
+        const docMetaKey = await getDocumentMetaKey(rootKeyBytes);
 
-      const [encEntries, encDocs] = await Promise.all([
-        fetchVaultEntries(),
-        fetchVaultDocuments(),
-      ]);
+        if (unlockGenerationRef.current !== generation) return;
 
-      // Decrypt passwords
-      const decryptedPasswords: DecryptedPasswordItem[] = [];
-      for (const entry of encEntries) {
-        try {
-          const data = await decryptPasswordEntry(
-            { ciphertext: entry.encrypted_data, iv: entry.iv },
-            passKey,
-            entry.id,
-            userId,
-          );
-          decryptedPasswords.push({
-            id: entry.id,
-            version: entry.version,
-            createdAt: entry.created_at,
-            updatedAt: entry.updated_at,
-            data,
-          });
-        } catch (err) {
-          console.warn("[vault] Skipping tampered or undecryptable password entry:", entry.id, err);
+        passKeyRef.current = passKey;
+        docMetaKeyRef.current = docMetaKey;
+
+        const [encEntries, encDocs] = await Promise.all([
+          fetchVaultEntries(),
+          fetchVaultDocuments(),
+        ]);
+
+        if (unlockGenerationRef.current !== generation) return;
+
+        // Decrypt passwords
+        const decryptedPasswords: DecryptedPasswordItem[] = [];
+        for (const entry of encEntries) {
+          if (unlockGenerationRef.current !== generation) return;
+          try {
+            const data = await decryptPasswordEntry(
+              { ciphertext: entry.encrypted_data, iv: entry.iv },
+              passKey,
+              entry.id,
+              userId,
+            );
+            decryptedPasswords.push({
+              id: entry.id,
+              version: entry.version,
+              createdAt: entry.created_at,
+              updatedAt: entry.updated_at,
+              data,
+            });
+          } catch (err) {
+            console.warn(
+              "[vault] Skipping tampered or undecryptable password entry:",
+              entry.id,
+              err,
+            );
+          }
+        }
+
+        // Decrypt documents
+        const decryptedDocs: DecryptedDocumentItem[] = [];
+        for (const doc of encDocs) {
+          if (unlockGenerationRef.current !== generation) return;
+          try {
+            const data = await decryptDocumentMeta(
+              { ciphertext: doc.encrypted_data, iv: doc.iv },
+              docMetaKey,
+              doc.id,
+              userId,
+            );
+            decryptedDocs.push({
+              id: doc.id,
+              version: doc.version,
+              createdAt: doc.created_at,
+              updatedAt: doc.updated_at,
+              data,
+              attachments: doc.attachments,
+            });
+          } catch (err) {
+            console.warn("[vault] Skipping tampered or undecryptable document:", doc.id, err);
+          }
+        }
+
+        if (unlockGenerationRef.current !== generation) return;
+
+        setPasswords(decryptedPasswords);
+        setDocuments(decryptedDocs);
+      } finally {
+        if (unlockGenerationRef.current === generation) {
+          setIsLoadingData(false);
         }
       }
-
-      // Decrypt documents
-      const decryptedDocs: DecryptedDocumentItem[] = [];
-      for (const doc of encDocs) {
-        try {
-          const data = await decryptDocumentMeta(
-            { ciphertext: doc.encrypted_data, iv: doc.iv },
-            docMetaKey,
-            doc.id,
-            userId,
-          );
-          decryptedDocs.push({
-            id: doc.id,
-            version: doc.version,
-            createdAt: doc.created_at,
-            updatedAt: doc.updated_at,
-            data,
-            attachments: doc.attachments,
-          });
-        } catch (err) {
-          console.warn("[vault] Skipping tampered or undecryptable document:", doc.id, err);
-        }
-      }
-
-      setPasswords(decryptedPasswords);
-      setDocuments(decryptedDocs);
-    } finally {
-      setIsLoadingData(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   // Setup vault (first time)
   const setupVault = useCallback(
@@ -321,11 +373,17 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         wrapped_key_iv: keys.wrappedKeyIv,
       });
 
+      unlockGenerationRef.current += 1;
+      const gen = unlockGenerationRef.current;
+
       setVaultMeta(meta);
       rootKeyRef.current = keys.rootKeyBytes;
 
       const passKey = await getPasswordKey(keys.rootKeyBytes);
       const docMetaKey = await getDocumentMetaKey(keys.rootKeyBytes);
+
+      if (unlockGenerationRef.current !== gen) return;
+
       passKeyRef.current = passKey;
       docMetaKeyRef.current = docMetaKey;
 
@@ -340,7 +398,13 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   // Unlock vault
   const unlockVaultAction = useCallback(
     async (masterPassword: string): Promise<boolean> => {
-      if (!user || !vaultMeta || !vaultMeta.salt || !vaultMeta.wrapped_key || !vaultMeta.wrapped_key_iv) {
+      if (
+        !user ||
+        !vaultMeta ||
+        !vaultMeta.salt ||
+        !vaultMeta.wrapped_key ||
+        !vaultMeta.wrapped_key_iv
+      ) {
         toast.error("Vault metadata missing. Please reload.");
         return false;
       }
@@ -358,12 +422,15 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           },
         );
 
+        unlockGenerationRef.current += 1;
+        const gen = unlockGenerationRef.current;
+
         rootKeyRef.current = rootKeyBytes;
         lastActivityRef.current = Date.now();
         setSecondsUntilLock(timeoutMinutes * 60);
         setStatus("unlocked");
 
-        await loadVaultData(rootKeyBytes, user.id);
+        await loadVaultData(rootKeyBytes, user.id, gen);
         toast.success("Vault unlocked.");
         return true;
       } catch {
@@ -374,12 +441,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [user, vaultMeta, timeoutMinutes, loadVaultData],
   );
 
-  // Change master password
+  // Change master password with optimistic concurrency protection
   const changeMasterPassword = useCallback(
     async (newPassword: string) => {
       if (!rootKeyRef.current || !vaultMeta) {
         throw new Error("Vault must be unlocked to change master password.");
       }
+
+      const gen = unlockGenerationRef.current;
 
       const rewrapped = await rewrapVaultKeys(rootKeyRef.current, newPassword, {
         iterations: vaultMeta.iterations,
@@ -387,62 +456,105 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         parallelism: vaultMeta.parallelism,
       });
 
-      const res = await changeVaultPasswordApi({
-        salt: rewrapped.saltHex,
-        wrapped_key: rewrapped.wrappedKey,
-        wrapped_key_iv: rewrapped.wrappedKeyIv,
-      });
+      if (unlockGenerationRef.current !== gen) {
+        throw new Error("Vault locked during password change.");
+      }
 
-      setVaultMeta((prev) =>
-        prev
-          ? {
-              ...prev,
-              salt: rewrapped.saltHex,
-              wrapped_key: rewrapped.wrappedKey,
-              wrapped_key_iv: rewrapped.wrappedKeyIv,
-              version: res.version,
-            }
-          : prev,
-      );
+      try {
+        const res = await changeVaultPasswordApi({
+          salt: rewrapped.saltHex,
+          wrapped_key: rewrapped.wrappedKey,
+          wrapped_key_iv: rewrapped.wrappedKeyIv,
+          expected_version: vaultMeta.version,
+        });
 
-      toast.success("Master password updated successfully.");
+        if (unlockGenerationRef.current !== gen) return;
+
+        setVaultMeta((prev) =>
+          prev
+            ? {
+                ...prev,
+                salt: rewrapped.saltHex,
+                wrapped_key: rewrapped.wrappedKey,
+                wrapped_key_iv: rewrapped.wrappedKeyIv,
+                version: res.version,
+              }
+            : prev,
+        );
+
+        toast.success("Master password updated successfully.");
+      } catch (err: any) {
+        if (
+          err?.status === 409 ||
+          err?.message?.includes("Conflict") ||
+          err?.message?.includes("409")
+        ) {
+          toast.error(
+            "Conflict: Master password was changed from another session. Please reload.",
+          );
+        }
+        throw err;
+      }
     },
     [vaultMeta],
   );
 
-  // Save (Create or Edit) Password Entry
+  // Save (Create or Edit) Password Entry with optimistic concurrency & async lock safety
   const savePassword = useCallback(
-    async (data: PasswordEntryData, id?: string) => {
+    async (data: PasswordEntryData, id?: string, expectedVersion?: number) => {
       if (!user || !passKeyRef.current) throw new Error("Vault is locked.");
 
+      const gen = unlockGenerationRef.current;
       const entryId = id || crypto.randomUUID();
       const encrypted = await encryptPasswordEntry(data, passKeyRef.current, entryId, user.id);
 
+      if (unlockGenerationRef.current !== gen) return;
+
       if (id) {
-        const updated = await updateVaultEntryApi(id, {
-          encrypted_data: encrypted.ciphertext,
-          iv: encrypted.iv,
-        });
-        setPasswords((prev) =>
-          prev.map((p) =>
-            p.id === id
-              ? {
-                  id,
-                  version: updated.version,
-                  createdAt: p.createdAt,
-                  updatedAt: updated.updated_at,
-                  data,
-                }
-              : p,
-          ),
-        );
-        toast.success("Password entry updated.");
+        try {
+          const updated = await updateVaultEntryApi(id, {
+            encrypted_data: encrypted.ciphertext,
+            iv: encrypted.iv,
+            expected_version: expectedVersion ?? 1,
+          });
+
+          if (unlockGenerationRef.current !== gen) return;
+
+          setPasswords((prev) =>
+            prev.map((p) =>
+              p.id === id
+                ? {
+                    id,
+                    version: updated.version,
+                    createdAt: p.createdAt,
+                    updatedAt: updated.updated_at,
+                    data,
+                  }
+                : p,
+            ),
+          );
+          toast.success("Password entry updated.");
+        } catch (err: any) {
+          if (
+            err?.status === 409 ||
+            err?.message?.includes("Conflict") ||
+            err?.message?.includes("409")
+          ) {
+            toast.error(
+              "Conflict: Password entry was modified by another session. Please reload.",
+            );
+          }
+          throw err;
+        }
       } else {
         const created = await createVaultEntryApi({
           id: entryId,
           encrypted_data: encrypted.ciphertext,
           iv: encrypted.iv,
         });
+
+        if (unlockGenerationRef.current !== gen) return;
+
         setPasswords((prev) => [
           {
             id: created.id,
@@ -466,66 +578,221 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     toast.success("Password entry deleted.");
   }, []);
 
-  // Save (Create or Edit) Document
+  // Save (Create or Edit) Document with correct upload order, rollback, and attachment lifecycle
   const saveDocument = useCallback(
     async (
       meta: DocumentMetadata,
       id?: string,
       newFiles?: Array<{ label: string; file: File }>,
+      removedAttachmentIds?: string[],
+      expectedVersion?: number,
     ) => {
       if (!user || !docMetaKeyRef.current || !rootKeyRef.current) {
         throw new Error("Vault is locked.");
       }
 
-      const docId = id || crypto.randomUUID();
-      const updatedMeta: DocumentMetadata = {
-        ...meta,
-        attachments: [...meta.attachments],
-      };
+      const gen = unlockGenerationRef.current;
 
-      // 1. If there are new files to attach, encrypt and upload each one
-      if (newFiles && newFiles.length > 0) {
-        for (const item of newFiles) {
-          const attachmentId = crypto.randomUUID();
-          const attKey = await getAttachmentKey(rootKeyRef.current, attachmentId);
-          const fileBytes = await item.file.arrayBuffer();
+      // ==========================================
+      // CASE 1: CREATING A NEW DOCUMENT
+      // ==========================================
+      if (!id) {
+        const docId = crypto.randomUUID();
+        const uploadedAttIds: string[] = [];
 
-          const { ciphertextBuffer, iv } = await encryptDocumentFile(
-            fileBytes,
-            attKey,
+        // 1. Create document record FIRST so server-side upload endpoint ownership check succeeds
+        const initialEncrypted = await encryptDocumentMeta(
+          { ...meta, attachments: [] },
+          docMetaKeyRef.current,
+          docId,
+          user.id,
+        );
+
+        if (unlockGenerationRef.current !== gen) {
+          throw new Error("Vault locked during document creation.");
+        }
+
+        const createdDoc = await createVaultDocumentApi({
+          id: docId,
+          encrypted_data: initialEncrypted.ciphertext,
+          iv: initialEncrypted.iv,
+        });
+
+        try {
+          const uploadedAttachmentsMeta: DocumentAttachmentMeta[] = [];
+
+          // 2. Upload attachments (if any)
+          if (newFiles && newFiles.length > 0) {
+            for (const item of newFiles) {
+              if (unlockGenerationRef.current !== gen) {
+                throw new Error("Vault locked during attachment upload.");
+              }
+
+              const attachmentId = crypto.randomUUID();
+              const attKey = await getAttachmentKey(rootKeyRef.current!, attachmentId);
+              const fileBytes = await readFileAsArrayBuffer(item.file);
+
+              const { ciphertextBuffer, iv } = await encryptDocumentFile(
+                fileBytes,
+                attKey,
+                docId,
+                attachmentId,
+                user.id,
+              );
+
+              await uploadVaultAttachmentApi(docId, attachmentId, iv, ciphertextBuffer);
+              uploadedAttIds.push(attachmentId);
+
+              uploadedAttachmentsMeta.push({
+                id: attachmentId,
+                label: item.label || item.file.name,
+                fileName: item.file.name,
+                fileSize: item.file.size,
+                mimeType: item.file.type || "application/octet-stream",
+                iv,
+              });
+            }
+          }
+
+          // 3. Update document with complete manifest
+          const finalMeta: DocumentMetadata = {
+            ...meta,
+            attachments: uploadedAttachmentsMeta,
+          };
+
+          const finalEncrypted = await encryptDocumentMeta(
+            finalMeta,
+            docMetaKeyRef.current,
             docId,
-            attachmentId,
             user.id,
           );
 
-          // Upload encrypted blob to server storage
-          await uploadVaultAttachmentApi(docId, attachmentId, iv, ciphertextBuffer);
+          if (unlockGenerationRef.current !== gen) {
+            throw new Error("Vault locked during manifest finalization.");
+          }
 
-          const attachmentMeta: DocumentAttachmentMeta = {
-            id: attachmentId,
-            label: item.label || item.file.name,
-            fileName: item.file.name,
-            fileSize: item.file.size,
-            mimeType: item.file.type || "application/octet-stream",
-            iv,
-          };
-          updatedMeta.attachments.push(attachmentMeta);
+          const updated = await updateVaultDocumentApi(docId, {
+            encrypted_data: finalEncrypted.ciphertext,
+            iv: finalEncrypted.iv,
+            expected_version: createdDoc.version,
+          });
+
+          if (unlockGenerationRef.current !== gen) return;
+
+          setDocuments((prev) => [
+            {
+              id: docId,
+              version: updated.version,
+              createdAt: createdDoc.created_at,
+              updatedAt: updated.updated_at,
+              data: finalMeta,
+              attachments: updated.attachments,
+            },
+            ...prev,
+          ]);
+          toast.success("Document saved to keeper.");
+        } catch (err) {
+          // P0 ROLLBACK ON PARTIAL FAILURE: Clean up uploaded files and delete document record
+          console.error("[vault] Document creation failed midway, rolling back:", err);
+          for (const attId of uploadedAttIds) {
+            try {
+              await deleteVaultAttachmentApi(attId);
+            } catch {
+              // Best-effort rollback
+            }
+          }
+          try {
+            await deleteVaultDocumentApi(docId);
+          } catch {
+            // Best-effort rollback
+          }
+          throw err;
+        }
+        return;
+      }
+
+      // ==========================================
+      // CASE 2: EDITING AN EXISTING DOCUMENT
+      // ==========================================
+      const docId = id;
+
+      // 1. P1 Attachment Lifecycle: Securely delete explicitly removed attachments from disk & DB
+      if (removedAttachmentIds && removedAttachmentIds.length > 0) {
+        for (const remId of removedAttachmentIds) {
+          try {
+            await deleteVaultAttachmentApi(remId);
+          } catch (e) {
+            console.warn("[vault] Failed to delete removed attachment:", remId, e);
+          }
         }
       }
 
-      // 2. Encrypt document metadata including updated attachment manifest
-      const encrypted = await encryptDocumentMeta(
-        updatedMeta,
-        docMetaKeyRef.current,
-        docId,
-        user.id,
+      const activeExistingAttachments = meta.attachments.filter(
+        (a) => !removedAttachmentIds?.includes(a.id),
       );
 
-      if (id) {
+      const newlyUploadedAttIds: string[] = [];
+      const updatedAttachments: DocumentAttachmentMeta[] = [...activeExistingAttachments];
+
+      try {
+        // 2. Upload any newly staged files
+        if (newFiles && newFiles.length > 0) {
+          for (const item of newFiles) {
+            if (unlockGenerationRef.current !== gen) {
+              throw new Error("Vault locked during attachment upload.");
+            }
+
+            const attachmentId = crypto.randomUUID();
+            const attKey = await getAttachmentKey(rootKeyRef.current, attachmentId);
+            const fileBytes = await readFileAsArrayBuffer(item.file);
+
+            const { ciphertextBuffer, iv } = await encryptDocumentFile(
+              fileBytes,
+              attKey,
+              docId,
+              attachmentId,
+              user.id,
+            );
+
+            await uploadVaultAttachmentApi(docId, attachmentId, iv, ciphertextBuffer);
+            newlyUploadedAttIds.push(attachmentId);
+
+            updatedAttachments.push({
+              id: attachmentId,
+              label: item.label || item.file.name,
+              fileName: item.file.name,
+              fileSize: item.file.size,
+              mimeType: item.file.type || "application/octet-stream",
+              iv,
+            });
+          }
+        }
+
+        // 3. Encrypt updated document metadata including complete attachment manifest
+        const finalMeta: DocumentMetadata = {
+          ...meta,
+          attachments: updatedAttachments,
+        };
+
+        const encrypted = await encryptDocumentMeta(
+          finalMeta,
+          docMetaKeyRef.current,
+          docId,
+          user.id,
+        );
+
+        if (unlockGenerationRef.current !== gen) {
+          throw new Error("Vault locked during document update.");
+        }
+
         const updated = await updateVaultDocumentApi(id, {
           encrypted_data: encrypted.ciphertext,
           iv: encrypted.iv,
+          expected_version: expectedVersion ?? 1,
         });
+
+        if (unlockGenerationRef.current !== gen) return;
+
         setDocuments((prev) =>
           prev.map((d) =>
             d.id === id
@@ -534,31 +801,31 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
                   version: updated.version,
                   createdAt: d.createdAt,
                   updatedAt: updated.updated_at,
-                  data: updatedMeta,
+                  data: finalMeta,
                   attachments: updated.attachments,
                 }
               : d,
           ),
         );
         toast.success("Document updated.");
-      } else {
-        const created = await createVaultDocumentApi({
-          id: docId,
-          encrypted_data: encrypted.ciphertext,
-          iv: encrypted.iv,
-        });
-        setDocuments((prev) => [
-          {
-            id: created.id,
-            version: created.version,
-            createdAt: created.created_at,
-            updatedAt: created.updated_at,
-            data: updatedMeta,
-            attachments: created.attachments,
-          },
-          ...prev,
-        ]);
-        toast.success("Document saved to keeper.");
+      } catch (err: any) {
+        // Rollback newly uploaded attachments on error
+        for (const attId of newlyUploadedAttIds) {
+          try {
+            await deleteVaultAttachmentApi(attId);
+          } catch {
+            // Best-effort rollback
+          }
+        }
+
+        if (
+          err?.status === 409 ||
+          err?.message?.includes("Conflict") ||
+          err?.message?.includes("409")
+        ) {
+          toast.error("Conflict: Document was modified by another session. Please reload.");
+        }
+        throw err;
       }
     },
     [user],

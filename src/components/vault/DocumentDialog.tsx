@@ -58,6 +58,79 @@ export const ALLOWED_DOC_TYPES = [
   "image/webp",
 ];
 
+/**
+ * Reads a File or Blob into an ArrayBuffer across all environments (browser, Web Worker, and test runners).
+ */
+export async function readFileAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
+  if (typeof blob.arrayBuffer === "function") {
+    try {
+      return await blob.arrayBuffer();
+    } catch {
+      // Fallback to FileReader if native arrayBuffer rejects
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as ArrayBuffer);
+    reader.onerror = () => reject(reader.error || new Error("Failed to read file buffer"));
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+/**
+ * Validates document magic bytes client-side before encrypting and staging.
+ * Supports PDF (%PDF), PNG (\x89PNG), JPEG (\xFF\xD8\xFF), and WebP (RIFF....WEBP).
+ */
+export async function validateDocumentFileMagicBytes(file: File): Promise<boolean> {
+  try {
+    const slice = file.slice(0, 16);
+    const arrayBuffer = await readFileAsArrayBuffer(slice);
+    const buf = new Uint8Array(arrayBuffer);
+    if (buf.length < 4) return false;
+
+    // PDF: %PDF (0x25 0x50 0x44 0x46)
+    if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
+      return true;
+    }
+    // PNG: \x89PNG\r\n\x1a\n (0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A)
+    if (
+      buf.length >= 8 &&
+      buf[0] === 0x89 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x4e &&
+      buf[3] === 0x47 &&
+      buf[4] === 0x0d &&
+      buf[5] === 0x0a &&
+      buf[6] === 0x1a &&
+      buf[7] === 0x0a
+    ) {
+      return true;
+    }
+    // JPEG: 0xFF 0xD8 0xFF
+    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+      return true;
+    }
+    // WebP: RIFF....WEBP (0x52 0x49 0x46 0x46 .... 0x57 0x45 0x42 0x50)
+    if (
+      buf.length >= 12 &&
+      buf[0] === 0x52 &&
+      buf[1] === 0x49 &&
+      buf[2] === 0x46 &&
+      buf[3] === 0x46 &&
+      buf[8] === 0x57 &&
+      buf[9] === 0x45 &&
+      buf[10] === 0x42 &&
+      buf[11] === 0x50
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDialogProps) {
   const { saveDocument } = useVault();
 
@@ -74,6 +147,9 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
   const [existingAttachments, setExistingAttachments] = useState(
     editingItem ? editingItem.data.attachments : [],
   );
+
+  // P1: Track removed attachment IDs to invoke authorized deletion workflow on submit
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<string[]>([]);
 
   // New staged attachments
   const [stagedFiles, setStagedFiles] = useState<
@@ -111,10 +187,11 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
       setTagsInput("");
       setExistingAttachments([]);
     }
+    setRemovedAttachmentIds([]);
     setStagedFiles([]);
   }, [editingItem, open]);
 
-  const handleFilesSelected = (files: FileList | null) => {
+  const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
 
     const validNewFiles: Array<{ id: string; file: File; label: string }> = [];
@@ -128,12 +205,21 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
 
       const mime = f.type.toLowerCase();
       const ext = f.name.toLowerCase();
-      const isAllowed =
+      const isAllowedExtOrMime =
         ALLOWED_DOC_TYPES.includes(mime) ||
         /\.(pdf|png|jpe?g|webp)$/i.test(ext);
 
-      if (!isAllowed) {
-        toast.error(`"${f.name}" is not supported. Use PDF, PNG, JPG, or WebP.`);
+      if (!isAllowedExtOrMime) {
+        toast.error(`"${f.name}" has unsupported format. Use PDF, PNG, JPG, or WebP.`);
+        continue;
+      }
+
+      // Client-side magic bytes validation
+      const isValidBytes = await validateDocumentFileMagicBytes(f);
+      if (!isValidBytes) {
+        toast.error(
+          `"${f.name}" has invalid or disguised file contents. Only authentic PDF, PNG, JPG, or WebP files are permitted.`,
+        );
         continue;
       }
 
@@ -166,6 +252,7 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
 
   const removeExistingAttachment = (attId: string) => {
     setExistingAttachments((prev) => prev.filter((a) => a.id !== attId));
+    setRemovedAttachmentIds((prev) => (prev.includes(attId) ? prev : [...prev, attId]));
   };
 
   const updateStagedLabel = (id: string, label: string) => {
@@ -202,6 +289,8 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
         },
         editingItem?.id,
         stagedFiles.map((s) => ({ label: s.label, file: s.file })),
+        removedAttachmentIds,
+        editingItem?.version,
       );
       onOpenChange(false);
     } catch (err: any) {

@@ -4,6 +4,7 @@ import { z } from "zod";
 const UpdateInput = z.object({
   encrypted_data: z.string().min(1),
   iv: z.string().min(12).max(64),
+  expected_version: z.number().int().min(1),
 });
 
 export const Route = createFileRoute("/api/vault/documents/$id")({
@@ -15,21 +16,35 @@ export const Route = createFileRoute("/api/vault/documents/$id")({
           const user = await api.requireUser(request);
           const body = UpdateInput.parse(await api.readJson(request));
 
-          const existing = await api.db().vaultDocument.findFirst({
-            where: { id: params.id, userId: user.id },
-          });
-
-          if (!existing) {
-            throw new api.ApiError(404, "Document not found");
-          }
-
-          const updated = await api.db().vaultDocument.update({
-            where: { id: params.id },
+          // P1: Atomic version-checked optimistic concurrency update
+          const result = await api.db().vaultDocument.updateMany({
+            where: {
+              id: params.id,
+              userId: user.id,
+              version: body.expected_version,
+            },
             data: {
               encryptedData: body.encrypted_data,
               iv: body.iv,
               version: { increment: 1 },
             },
+          });
+
+          if (result.count === 0) {
+            const existing = await api.db().vaultDocument.findFirst({
+              where: { id: params.id, userId: user.id },
+            });
+            if (!existing) {
+              throw new api.ApiError(404, "Document not found");
+            }
+            throw new api.ApiError(
+              409,
+              "Conflict: Document was modified by another session. Please reload.",
+            );
+          }
+
+          const updated = await api.db().vaultDocument.findUniqueOrThrow({
+            where: { id: params.id },
             include: {
               attachments: {
                 select: {

@@ -64,6 +64,7 @@ export async function changeVaultPasswordApi(data: {
   salt: string;
   wrapped_key: string;
   wrapped_key_iv: string;
+  expected_version: number;
 }): Promise<{ success: boolean; version: number }> {
   return api<{ success: boolean; version: number }>("/api/vault/password", {
     method: "POST",
@@ -88,7 +89,7 @@ export async function createVaultEntryApi(data: {
 
 export async function updateVaultEntryApi(
   id: string,
-  data: { encrypted_data: string; iv: string },
+  data: { encrypted_data: string; iv: string; expected_version: number },
 ): Promise<EncryptedEntryDto> {
   return api<EncryptedEntryDto>(`/api/vault/entries/${id}`, {
     method: "PATCH",
@@ -119,7 +120,7 @@ export async function createVaultDocumentApi(data: {
 
 export async function updateVaultDocumentApi(
   id: string,
-  data: { encrypted_data: string; iv: string },
+  data: { encrypted_data: string; iv: string; expected_version: number },
 ): Promise<EncryptedDocumentDto> {
   return api<EncryptedDocumentDto>(`/api/vault/documents/${id}`, {
     method: "PATCH",
@@ -131,6 +132,17 @@ export async function deleteVaultDocumentApi(id: string): Promise<{ success: boo
   return api<{ success: boolean; id: string }>(`/api/vault/documents/${id}`, {
     method: "DELETE",
   });
+}
+
+export async function deleteVaultAttachmentApi(
+  attachmentId: string,
+): Promise<{ success: boolean; id: string }> {
+  return api<{ success: boolean; id: string }>(
+    `/api/vault/documents/attachments/${attachmentId}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function uploadVaultAttachmentApi(

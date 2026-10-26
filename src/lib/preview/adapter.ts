@@ -221,6 +221,10 @@ function handlePreviewRequest(
   }
   if (route === "POST /vault/password") {
     if (!db.vaultMeta) return err(404, "Vault not initialized.");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && db.vaultMeta["version"] !== expected) {
+      return err(409, "Conflict: Master password was changed from another session.");
+    }
     db.vaultMeta["salt"] = b["salt"];
     db.vaultMeta["wrapped_key"] = b["wrapped_key"];
     db.vaultMeta["wrapped_key_iv"] = b["wrapped_key_iv"];
@@ -246,6 +250,10 @@ function handlePreviewRequest(
   if (route === "PATCH /vault/entries/:x") {
     const e = find(db.vaultEntries, id);
     if (!e) return err(404, "Vault entry not found");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && e["version"] !== expected) {
+      return err(409, "Conflict: Entry has been modified elsewhere.");
+    }
     touch(e, {
       encrypted_data: b["encrypted_data"],
       iv: b["iv"],
@@ -276,6 +284,10 @@ function handlePreviewRequest(
   if (route === "PATCH /vault/documents/:x") {
     const d = find(db.vaultDocuments, id);
     if (!d) return err(404, "Vault document not found");
+    const expected = b["expected_version"] as number | undefined;
+    if (expected !== undefined && d["version"] !== expected) {
+      return err(409, "Conflict: Document has been modified elsewhere.");
+    }
     touch(d, {
       encrypted_data: b["encrypted_data"],
       iv: b["iv"],
@@ -292,23 +304,36 @@ function handlePreviewRequest(
     remove(db.vaultDocuments, (r) => r.id === id);
     return ok({ success: true, id });
   }
+  if (route === "DELETE /vault/documents/attachments/:x") {
+    db.vaultAttachments.delete(id);
+    for (const doc of db.vaultDocuments) {
+      const atts = (doc["attachments"] as Array<{ id: string }>) || [];
+      const filtered = atts.filter((a) => a.id !== id);
+      if (filtered.length !== atts.length) {
+        doc["attachments"] = filtered;
+      }
+    }
+    return ok({ success: true, id });
+  }
   if (route === "POST /vault/documents/upload") {
     const docId = b["document_id"] as string;
     const attId = b["attachment_id"] as string;
     const iv = b["iv"] as string;
     const base64 = (b["base64"] as string) || "";
-    db.vaultAttachments.set(attId, { base64, iv });
     const doc = find(db.vaultDocuments, docId);
-    if (doc) {
-      const atts = (doc["attachments"] as Array<Record<string, unknown>>) || [];
-      atts.push({
-        id: attId,
-        encrypted_size: base64.length,
-        iv,
-        created_at: now(),
-      });
-      doc["attachments"] = atts;
+    if (!doc) return err(404, "Target document not found or access denied.");
+    if (db.vaultAttachments.has(attId)) {
+      return err(409, "Attachment file with this ID already exists.");
     }
+    db.vaultAttachments.set(attId, { base64, iv });
+    const atts = (doc["attachments"] as Array<Record<string, unknown>>) || [];
+    atts.push({
+      id: attId,
+      encrypted_size: base64.length,
+      iv,
+      created_at: now(),
+    });
+    doc["attachments"] = atts;
     return ok({ id: attId, document_id: docId, encrypted_size: base64.length, iv }, 201);
   }
   if (route === "GET /vault/documents/files/:x") {

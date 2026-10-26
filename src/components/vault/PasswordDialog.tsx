@@ -74,6 +74,7 @@ export function PasswordDialog({ open, onOpenChange, editingItem }: PasswordDial
           notes: notes.trim(),
         },
         editingItem?.id,
+        editingItem?.version,
       );
       onOpenChange(false);
     } catch (err: any) {

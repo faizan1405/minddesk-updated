@@ -14,6 +14,8 @@ import { Route as VaultDocFilesRoute } from "@/routes/api.vault.documents.files.
 describe("My Private Vault API Endpoints", () => {
   const originalEnv = { ...process.env };
   const mockUser = { id: "user_vault_test_1", email: "vault-tester@minddesk.com" };
+  const validAttachmentUuid = "a1b2c3d4-e5f6-4a5b-8c7d-9e0f1a2b3c4d";
+  const validDocumentUuid = "f1e2d3c4-b5a6-4987-a123-456789abcdef";
 
   beforeEach(() => {
     process.env = { ...originalEnv, DATABASE_URL: "mysql://mock" };
@@ -109,11 +111,11 @@ describe("My Private Vault API Endpoints", () => {
   });
 
   describe("POST /api/vault/password", () => {
-    it("updates wrapped key and increments version on master password change", async () => {
+    it("updates wrapped key with atomic version-checked update", async () => {
       const mockPrisma = {
         vaultMeta: {
-          findUnique: vi.fn().mockResolvedValue({ userId: mockUser.id }),
-          update: vi.fn().mockResolvedValue({
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
             version: 2,
             updatedAt: new Date("2026-10-26T22:00:00Z"),
           }),
@@ -130,6 +132,7 @@ describe("My Private Vault API Endpoints", () => {
           salt: "newSaltHex1234567890abcdef123456",
           wrapped_key: "newWrappedKeyBase64",
           wrapped_key_iv: "newWrappedKeyIvBase64",
+          expected_version: 1,
         }),
       });
 
@@ -139,6 +142,36 @@ describe("My Private Vault API Endpoints", () => {
       expect(res.status).toBe(200);
       expect(json.success).toBe(true);
       expect(json.version).toBe(2);
+      expect(mockPrisma.vaultMeta.updateMany).toHaveBeenCalledWith({
+        where: { userId: mockUser.id, version: 1 },
+        data: expect.objectContaining({ version: { increment: 1 } }),
+      });
+    });
+
+    it("rejects concurrent master password changes with 409 Conflict", async () => {
+      const mockPrisma = {
+        vaultMeta: {
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findUnique: vi.fn().mockResolvedValue({ userId: mockUser.id, version: 2 }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultPasswordRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salt: "newSaltHex1234567890abcdef123456",
+          wrapped_key: "newWrappedKeyBase64",
+          wrapped_key_iv: "newWrappedKeyIvBase64",
+          expected_version: 1,
+        }),
+      });
+
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(409);
     });
   });
 
@@ -178,11 +211,11 @@ describe("My Private Vault API Endpoints", () => {
       expect(json.encrypted_data).toBe("ciphertextBase64");
     });
 
-    it("updates and deletes password entry with user tenancy check", async () => {
+    it("updates password entry with atomic version check and deletes entry", async () => {
       const mockPrisma = {
         vaultEntry: {
-          findFirst: vi.fn().mockResolvedValue({ id: "entry_123", userId: mockUser.id }),
-          update: vi.fn().mockResolvedValue({
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
             id: "entry_123",
             encryptedData: "updatedCiphertext",
             iv: "dGVzdGl2YmFzZTY0Cg==",
@@ -190,6 +223,7 @@ describe("My Private Vault API Endpoints", () => {
             createdAt: new Date(),
             updatedAt: new Date(),
           }),
+          findFirst: vi.fn().mockResolvedValue({ id: "entry_123", userId: mockUser.id }),
           delete: vi.fn().mockResolvedValue({ id: "entry_123" }),
         },
       };
@@ -205,17 +239,46 @@ describe("My Private Vault API Endpoints", () => {
         body: JSON.stringify({
           encrypted_data: "updatedCiphertext",
           iv: "dGVzdGl2YmFzZTY0Cg==",
+          expected_version: 1,
         }),
       });
       const patchRes = await itemHandlers.PATCH({ request: patchReq, params: { id: "entry_123" } });
       const patchJson = await patchRes.json();
       expect(patchJson.version).toBe(2);
+      expect(mockPrisma.vaultEntry.updateMany).toHaveBeenCalledWith({
+        where: { id: "entry_123", userId: mockUser.id, version: 1 },
+        data: expect.objectContaining({ version: { increment: 1 } }),
+      });
 
       // DELETE
       const delReq = new Request("http://localhost/api/vault/entries/entry_123", { method: "DELETE" });
       const delRes = await itemHandlers.DELETE({ request: delReq, params: { id: "entry_123" } });
       const delJson = await delRes.json();
       expect(delJson.success).toBe(true);
+    });
+
+    it("returns 409 Conflict when updating password entry with mismatched version", async () => {
+      const mockPrisma = {
+        vaultEntry: {
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findFirst: vi.fn().mockResolvedValue({ id: "entry_123", userId: mockUser.id, version: 2 }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const itemHandlers = (VaultEntryItemRoute.options as any).server.handlers;
+      const patchReq = new Request("http://localhost/api/vault/entries/entry_123", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encrypted_data: "updatedCiphertext",
+          iv: "dGVzdGl2YmFzZTY0Cg==",
+          expected_version: 1,
+        }),
+      });
+      const patchRes = await itemHandlers.PATCH({ request: patchReq, params: { id: "entry_123" } });
+      expect(patchRes.status).toBe(409);
     });
   });
 
@@ -224,7 +287,7 @@ describe("My Private Vault API Endpoints", () => {
       const mockPrisma = {
         vaultDocument: {
           create: vi.fn().mockResolvedValue({
-            id: "doc_123",
+            id: validDocumentUuid,
             userId: mockUser.id,
             encryptedData: "docMetaCiphertext",
             iv: "dGVzdGl2YmFzZTY0Cg==",
@@ -252,7 +315,7 @@ describe("My Private Vault API Endpoints", () => {
       const json = await res.json();
 
       expect(res.status).toBe(201);
-      expect(json.id).toBe("doc_123");
+      expect(json.id).toBe(validDocumentUuid);
       expect(json.attachments).toEqual([]);
     });
 
@@ -261,12 +324,12 @@ describe("My Private Vault API Endpoints", () => {
       vi.spyOn(vaultStorage, "readEncryptedAttachmentFile").mockResolvedValue({
         buffer: Buffer.from("encrypted-binary-content"),
         iv: "attachmentIvBase64",
-        storageKey: "att_1.enc",
+        storageKey: `${validAttachmentUuid}.enc`,
       });
 
       const handlers = (VaultDocFilesRoute.options as any).server.handlers;
-      const req = new Request("http://localhost/api/vault/documents/files/att_1");
-      const res = await handlers.GET({ request: req, params: { id: "att_1" } });
+      const req = new Request(`http://localhost/api/vault/documents/files/${validAttachmentUuid}`);
+      const res = await handlers.GET({ request: req, params: { id: validAttachmentUuid } });
 
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")).toBe("application/octet-stream");

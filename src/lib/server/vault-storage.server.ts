@@ -2,10 +2,17 @@
 // Files stored here are pure AES-256-GCM ciphertexts with zero unencrypted headers or metadata.
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { db, ApiError } from "./api.server";
 
 export const MAX_VAULT_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+
+export const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(id: unknown): id is string {
+  return typeof id === "string" && UUID_REGEX.test(id.trim());
+}
 
 export function getVaultStorageDir(): string {
   if (process.env["VAULT_STORAGE_DIR"]) {
@@ -24,6 +31,34 @@ export async function ensureVaultStorageDir(): Promise<string> {
   return dir;
 }
 
+export function getSafeAttachmentPath(storageDir: string, storageKey: string): string {
+  if (!storageKey || typeof storageKey !== "string") {
+    throw new ApiError(400, "Invalid storage key: must be a non-empty string.");
+  }
+  // Disallow any path traversal characters
+  if (storageKey.includes("/") || storageKey.includes("\\") || storageKey.includes("..")) {
+    throw new ApiError(400, "Path traversal sequence detected in storage key.");
+  }
+
+  // Storage filename must strictly be <uuid>.enc
+  const match = storageKey.match(
+    /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.enc$/i,
+  );
+  if (!match) {
+    throw new ApiError(400, "Invalid attachment storage key format: must match <uuid>.enc.");
+  }
+
+  const resolvedDir = resolve(storageDir);
+  const resolvedPath = resolve(resolvedDir, storageKey);
+  const prefix = resolvedDir.endsWith(sep) ? resolvedDir : resolvedDir + sep;
+
+  if (!resolvedPath.startsWith(prefix)) {
+    throw new ApiError(403, "Storage path traversal detected: directory confinement violation.");
+  }
+
+  return resolvedPath;
+}
+
 export async function saveEncryptedAttachmentFile(
   userId: string,
   documentId: string,
@@ -36,15 +71,32 @@ export async function saveEncryptedAttachmentFile(
   encryptedSize: number;
   iv: string;
 }> {
+  if (!isValidUuid(documentId)) {
+    throw new ApiError(400, "Invalid document ID: must be a valid UUID.");
+  }
+  if (!isValidUuid(attachmentId)) {
+    throw new ApiError(400, "Invalid attachment ID: must be a valid UUID.");
+  }
+
   if (encryptedBuffer.length > MAX_VAULT_ATTACHMENT_BYTES) {
     throw new ApiError(400, "Encrypted attachment exceeds maximum size (25 MB).");
   }
 
   const storageDir = await ensureVaultStorageDir();
   const storageKey = `${attachmentId}.enc`;
-  const filePath = join(storageDir, storageKey);
+  const filePath = getSafeAttachmentPath(storageDir, storageKey);
 
-  await writeFile(filePath, encryptedBuffer);
+  let fileWritten = false;
+  try {
+    // Exclusive creation: fails with EEXIST if file already exists
+    await writeFile(filePath, encryptedBuffer, { flag: "wx" });
+    fileWritten = true;
+  } catch (err: any) {
+    if (err?.code === "EEXIST") {
+      throw new ApiError(409, "Attachment file with this ID already exists on storage.");
+    }
+    throw err;
+  }
 
   try {
     const prisma = db();
@@ -66,10 +118,13 @@ export async function saveEncryptedAttachmentFile(
       iv: record.iv,
     };
   } catch (err) {
-    try {
-      await unlink(filePath);
-    } catch {
-      // Best-effort cleanup on failure
+    // Safe cleanup: ONLY unlink if this specific invocation wrote the file
+    if (fileWritten) {
+      try {
+        await unlink(filePath);
+      } catch {
+        // Best-effort cleanup
+      }
     }
     throw err;
   }
@@ -79,6 +134,10 @@ export async function readEncryptedAttachmentFile(
   userId: string,
   attachmentId: string,
 ): Promise<{ buffer: Buffer; iv: string; storageKey: string }> {
+  if (!isValidUuid(attachmentId)) {
+    throw new ApiError(400, "Invalid attachment ID: must be a valid UUID.");
+  }
+
   const prisma = db();
   const record = await prisma.vaultDocumentAttachment.findFirst({
     where: { id: attachmentId, userId },
@@ -89,7 +148,7 @@ export async function readEncryptedAttachmentFile(
   }
 
   const storageDir = getVaultStorageDir();
-  const filePath = join(storageDir, record.storageKey);
+  const filePath = getSafeAttachmentPath(storageDir, record.storageKey);
 
   try {
     const buffer = await readFile(filePath);
@@ -103,6 +162,10 @@ export async function deleteEncryptedAttachmentFile(
   userId: string,
   attachmentId: string,
 ): Promise<void> {
+  if (!isValidUuid(attachmentId)) {
+    throw new ApiError(400, "Invalid attachment ID: must be a valid UUID.");
+  }
+
   const prisma = db();
   const record = await prisma.vaultDocumentAttachment.findFirst({
     where: { id: attachmentId, userId },
@@ -113,12 +176,12 @@ export async function deleteEncryptedAttachmentFile(
   }
 
   const storageDir = getVaultStorageDir();
-  const filePath = join(storageDir, record.storageKey);
+  const filePath = getSafeAttachmentPath(storageDir, record.storageKey);
 
   try {
     await unlink(filePath);
   } catch {
-    // Best-effort file removal
+    // Best-effort file removal (e.g. file already unlinked)
   }
 
   await prisma.vaultDocumentAttachment.delete({

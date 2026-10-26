@@ -85,6 +85,7 @@ import { Route as ApiVaultDocumentsIdRouteImport } from './routes/api.vault.docu
 import { Route as ApiVaultDocumentsUploadRouteImport } from './routes/api.vault.documents.upload'
 import { Route as ApiVaultEntriesIdRouteImport } from './routes/api.vault.entries.$id'
 import { Route as ApiHabitsIdCompletionsDateRouteImport } from './routes/api.habits.$id.completions.$date'
+import { Route as ApiVaultDocumentsAttachmentsIdRouteImport } from './routes/api.vault.documents.attachments.$id'
 import { Route as ApiVaultDocumentsFilesIdRouteImport } from './routes/api.vault.documents.files.$id'
 import { Route as ApiPlanActivitiesIdExceptionsDateRouteImport } from './routes/api.plan.activities.$id.exceptions.$date'
 
@@ -476,6 +477,12 @@ const ApiHabitsIdCompletionsDateRoute =
     path: '/completions/$date',
     getParentRoute: () => ApiHabitsIdRoute,
   } as any)
+const ApiVaultDocumentsAttachmentsIdRoute =
+  ApiVaultDocumentsAttachmentsIdRouteImport.update({
+    id: '/attachments/$id',
+    path: '/attachments/$id',
+    getParentRoute: () => ApiVaultDocumentsRoute,
+  } as any)
 const ApiVaultDocumentsFilesIdRoute =
   ApiVaultDocumentsFilesIdRouteImport.update({
     id: '/files/$id',
@@ -565,6 +572,7 @@ export interface FileRoutesByFullPath {
   '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
   '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
@@ -640,6 +648,7 @@ export interface FileRoutesByTo {
   '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/projects/$projectId': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
   '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
@@ -721,6 +730,7 @@ export interface FileRoutesById {
   '/api/vault/entries/$id': typeof ApiVaultEntriesIdRoute
   '/_authenticated/projects/$projectId/': typeof AuthenticatedProjectsProjectIdIndexRoute
   '/api/habits/$id/completions/$date': typeof ApiHabitsIdCompletionsDateRoute
+  '/api/vault/documents/attachments/$id': typeof ApiVaultDocumentsAttachmentsIdRoute
   '/api/vault/documents/files/$id': typeof ApiVaultDocumentsFilesIdRoute
   '/api/plan/activities/$id/exceptions/$date': typeof ApiPlanActivitiesIdExceptionsDateRoute
 }
@@ -802,6 +812,7 @@ export interface FileRouteTypes {
     | '/api/vault/entries/$id'
     | '/projects/$projectId/'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
     | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   fileRoutesByTo: FileRoutesByTo
@@ -877,6 +888,7 @@ export interface FileRouteTypes {
     | '/api/vault/entries/$id'
     | '/projects/$projectId'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
     | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   id:
@@ -957,6 +969,7 @@ export interface FileRouteTypes {
     | '/api/vault/entries/$id'
     | '/_authenticated/projects/$projectId/'
     | '/api/habits/$id/completions/$date'
+    | '/api/vault/documents/attachments/$id'
     | '/api/vault/documents/files/$id'
     | '/api/plan/activities/$id/exceptions/$date'
   fileRoutesById: FileRoutesById
@@ -1530,6 +1543,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHabitsIdCompletionsDateRouteImport
       parentRoute: typeof ApiHabitsIdRoute
     }
+    '/api/vault/documents/attachments/$id': {
+      id: '/api/vault/documents/attachments/$id'
+      path: '/attachments/$id'
+      fullPath: '/api/vault/documents/attachments/$id'
+      preLoaderRoute: typeof ApiVaultDocumentsAttachmentsIdRouteImport
+      parentRoute: typeof ApiVaultDocumentsRoute
+    }
     '/api/vault/documents/files/$id': {
       id: '/api/vault/documents/files/$id'
       path: '/files/$id'
@@ -1828,12 +1848,14 @@ const ApiPlanCategoriesRouteWithChildren =
 interface ApiVaultDocumentsRouteChildren {
   ApiVaultDocumentsIdRoute: typeof ApiVaultDocumentsIdRoute
   ApiVaultDocumentsUploadRoute: typeof ApiVaultDocumentsUploadRoute
+  ApiVaultDocumentsAttachmentsIdRoute: typeof ApiVaultDocumentsAttachmentsIdRoute
   ApiVaultDocumentsFilesIdRoute: typeof ApiVaultDocumentsFilesIdRoute
 }
 
 const ApiVaultDocumentsRouteChildren: ApiVaultDocumentsRouteChildren = {
   ApiVaultDocumentsIdRoute: ApiVaultDocumentsIdRoute,
   ApiVaultDocumentsUploadRoute: ApiVaultDocumentsUploadRoute,
+  ApiVaultDocumentsAttachmentsIdRoute: ApiVaultDocumentsAttachmentsIdRoute,
   ApiVaultDocumentsFilesIdRoute: ApiVaultDocumentsFilesIdRoute,
 }
 
