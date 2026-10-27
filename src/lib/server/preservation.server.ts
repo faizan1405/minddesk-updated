@@ -1,7 +1,14 @@
 import { ApiError } from "@/lib/server/api.server";
 
 export type PreservationBlockedOperation =
-  "workspace_deletion" | "empty_trash" | "auto_cleanup" | "single_permanent_delete";
+  | "workspace_deletion"
+  | "empty_trash"
+  | "auto_cleanup"
+  | "single_permanent_delete"
+  | "vault_entry_deletion"
+  | "vault_document_deletion"
+  | "plan_activity_deletion"
+  | "plan_category_deletion";
 
 /**
  * Checks whether Data Preservation Mode is active.
@@ -13,7 +20,10 @@ export type PreservationBlockedOperation =
  * - Automated permanent purging of expired Recycle Bin records is suppressed.
  * - Emptying the Recycle Bin is blocked.
  * - Deleting all workspace data is blocked.
- * - By default, strict preservation is also active, blocking single-item permanent deletion.
+ * - Single-item permanent Recycle Bin deletion is blocked by default.
+ * - Deleting Vault password entries and documents is blocked.
+ * - Deleting Plan Your Day activities and categories is blocked.
+ * - Obsolete Vault document attachment files are preserved on disk without unlinking.
  * - Ordinary note/task editing, soft-deletion, and Recycle Bin restore remain 100% operational.
  */
 export function isDataPreservationMode(): boolean {
@@ -90,5 +100,37 @@ export function assertBulkDeletionAllowed(operation: PreservationBlockedOperatio
         );
       }
       return;
+
+    case "vault_entry_deletion":
+      throw new ApiError(
+        423,
+        "Data Preservation Mode is active: Deleting Vault password entries is disabled. Your encrypted credentials remain protected.",
+        undefined,
+        { code: "DATA_PRESERVATION_ACTIVE", operation },
+      );
+
+    case "vault_document_deletion":
+      throw new ApiError(
+        423,
+        "Data Preservation Mode is active: Deleting Vault documents and attachments is disabled. Your encrypted files remain protected.",
+        undefined,
+        { code: "DATA_PRESERVATION_ACTIVE", operation },
+      );
+
+    case "plan_activity_deletion":
+      throw new ApiError(
+        423,
+        "Data Preservation Mode is active: Deleting planned activities is disabled to prevent schedule loss. Activities remain protected.",
+        undefined,
+        { code: "DATA_PRESERVATION_ACTIVE", operation },
+      );
+
+    case "plan_category_deletion":
+      throw new ApiError(
+        423,
+        "Data Preservation Mode is active: Deleting activity categories is disabled. Categories remain protected.",
+        undefined,
+        { code: "DATA_PRESERVATION_ACTIVE", operation },
+      );
   }
 }

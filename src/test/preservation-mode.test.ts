@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as apiServer from "@/lib/server/api.server";
+import * as vaultStorage from "@/lib/server/vault-storage.server";
 import {
   isDataPreservationMode,
   isStrictPreservationMode,
@@ -20,6 +21,11 @@ import { Route as CleanupRoute } from "@/routes/api.trash.cleanup";
 import { Route as DeleteDataRoute } from "@/routes/api.data.delete";
 import { Route as PermanentRoute } from "@/routes/api.trash.permanent";
 import { Route as DataSummaryRoute } from "@/routes/api.data.summary";
+import { Route as AuthMeRoute } from "@/routes/api.auth.me";
+import { Route as VaultEntryRoute } from "@/routes/api.vault.entries.$id";
+import { Route as VaultDocRoute } from "@/routes/api.vault.documents.$id";
+import { Route as PlanActivityRoute } from "@/routes/api.plan.activities.$id";
+import { Route as PlanCategoryRoute } from "@/routes/api.plan.categories.$id";
 
 describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   const originalEnv = { ...process.env };
@@ -246,9 +252,9 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
         /Data Preservation Mode is active: Permanent single-item deletion is disabled/i,
       );
 
-      await expect(permanentlyDeleteItem(mockUser.id, "note", "note-uuid-1")).rejects.toThrowError(
-        /Data Preservation Mode is active/i,
-      );
+      await expect(
+        permanentlyDeleteItem(mockUser.id, "note", "note-uuid-1"),
+      ).rejects.toThrowError(/Data Preservation Mode is active/i);
     });
 
     it("blocks /api/trash/permanent with HTTP 423 Locked BY DEFAULT", async () => {
@@ -279,9 +285,164 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 5. API Status Propagation to UI (Recycle Bin & Settings)
+  // 5. Extended Direct Permanent Deletion Protection (Vault & Plan)
+  // ---------------------------------------------------------------------------
+  describe("Extended Direct Permanent Deletion Protection (Vault & Plan)", () => {
+    it("blocks DELETE /api/vault/entries/$id with HTTP 423 Locked", async () => {
+      const mockPrisma = {
+        vaultEntry: {
+          findFirst: vi.fn().mockResolvedValue({ id: "entry-1", userId: mockUser.id }),
+          delete: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultEntryRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/entries/entry-1", { method: "DELETE" });
+
+      const res = await handlers.DELETE({ request: req, params: { id: "entry-1" } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Deleting Vault password entries is disabled/i);
+      expect(mockPrisma.vaultEntry.delete).not.toHaveBeenCalled();
+    });
+
+    it("blocks DELETE /api/vault/documents/$id with HTTP 423 Locked", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          findFirst: vi.fn().mockResolvedValue({ id: "doc-1", userId: mockUser.id, attachments: [] }),
+          delete: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+      vi.spyOn(vaultStorage, "deleteEncryptedAttachmentFile").mockResolvedValue();
+
+      const handlers = (VaultDocRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/documents/doc-1", { method: "DELETE" });
+
+      const res = await handlers.DELETE({ request: req, params: { id: "doc-1" } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Deleting Vault documents and attachments is disabled/i);
+      expect(mockPrisma.vaultDocument.delete).not.toHaveBeenCalled();
+      expect(vaultStorage.deleteEncryptedAttachmentFile).not.toHaveBeenCalled();
+    });
+
+    it("preserves obsolete attachment files on disk during PATCH /api/vault/documents/$id", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
+            id: "doc-1",
+            encryptedData: "new_encrypted_manifest",
+            iv: "mock_iv_12345678",
+            version: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attachments: [],
+          }),
+        },
+        vaultDocumentAttachment: {
+          findFirst: vi.fn().mockResolvedValue({ id: "att-obsolete-1", storageKey: "file.bin" }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+      const deleteFileSpy = vi.spyOn(vaultStorage, "deleteEncryptedAttachmentFile");
+
+      const handlers = (VaultDocRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/documents/doc-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encrypted_data: "new_encrypted_manifest",
+          iv: "mock_iv_12345678",
+          expected_version: 1,
+          obsolete_attachment_ids: ["att-obsolete-1"],
+        }),
+      });
+
+      const res = await handlers.PATCH({ request: req, params: { id: "doc-1" } });
+      expect(res.status).toBe(200);
+
+      // GUARANTEE: In Data Preservation Mode, obsolete attachment was NOT unlinked from storage
+      expect(deleteFileSpy).not.toHaveBeenCalled();
+    });
+
+    it("blocks DELETE /api/plan/activities/$id with HTTP 423 Locked", async () => {
+      const mockPrisma = {
+        planActivity: {
+          deleteMany: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (PlanActivityRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/plan/activities/activity-1", { method: "DELETE" });
+
+      const res = await handlers.DELETE({ request: req, params: { id: "activity-1" } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Deleting planned activities is disabled/i);
+      expect(mockPrisma.planActivity.deleteMany).not.toHaveBeenCalled();
+    });
+
+    it("blocks DELETE /api/plan/categories/$id with HTTP 423 Locked", async () => {
+      const mockPrisma = {
+        planCategory: {
+          findFirst: vi.fn().mockResolvedValue({ id: "cat-1", userId: mockUser.id, isDefault: false }),
+          delete: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (PlanCategoryRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/plan/categories/cat-1", { method: "DELETE" });
+
+      const res = await handlers.DELETE({ request: req, params: { id: "cat-1" } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Deleting activity categories is disabled/i);
+      expect(mockPrisma.planCategory.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 6. API Status Propagation to UI (Auth, Trash & Settings)
   // ---------------------------------------------------------------------------
   describe("Preservation Status Propagation to UI API Endpoints", () => {
+    it("returns preservation_mode: true in /api/auth/me", async () => {
+      vi.spyOn(apiServer, "getUser").mockResolvedValue({
+        id: mockUser.id,
+        email: mockUser.email,
+        displayName: "Test User",
+        createdAt: new Date(),
+      } as any);
+
+      const handlers = (AuthMeRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/auth/me", { method: "GET" });
+
+      const res = await handlers.GET({ request: req });
+      expect(res.status).toBe(200);
+
+      const json = await res.json();
+      expect(json.preservation_mode).toBe(true);
+      expect(json.user.email).toBe(mockUser.email);
+    });
+
     it("returns preservation_mode: true and strict_mode: true in /api/trash", async () => {
       const mockPrisma = {
         taskList: { findMany: vi.fn().mockResolvedValue([]) },
@@ -336,7 +497,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 6. Normal User Workflows Remain 100% Operational
+  // 7. Normal User Workflows Remain 100% Operational
   // ---------------------------------------------------------------------------
   describe("Preservation of Ordinary User Workflows", () => {
     it("allows restoring an item from Recycle Bin while Preservation Mode is active", async () => {
@@ -410,10 +571,10 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 7. Explicit Bypass in Disabled Mode
+  // 8. Explicit Bypass in Disabled Mode
   // ---------------------------------------------------------------------------
   describe("Explicit Bypass when DATA_PRESERVATION_MODE='disabled'", () => {
-    it("allows bulk operations when preservation mode is explicitly disabled", () => {
+    it("allows all operations when preservation mode is explicitly disabled", () => {
       process.env["DATA_PRESERVATION_MODE"] = "disabled";
       expect(isDataPreservationMode()).toBe(false);
 
@@ -421,6 +582,10 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(() => assertBulkDeletionAllowed("empty_trash")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("auto_cleanup")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("single_permanent_delete")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("vault_entry_deletion")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("vault_document_deletion")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("plan_activity_deletion")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("plan_category_deletion")).not.toThrow();
     });
   });
 });
