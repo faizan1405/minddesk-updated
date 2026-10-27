@@ -13,6 +13,7 @@ export type PreservationBlockedOperation =
  * - Automated permanent purging of expired Recycle Bin records is suppressed.
  * - Emptying the Recycle Bin is blocked.
  * - Deleting all workspace data is blocked.
+ * - By default, strict preservation is also active, blocking single-item permanent deletion.
  * - Ordinary note/task editing, soft-deletion, and Recycle Bin restore remain 100% operational.
  */
 export function isDataPreservationMode(): boolean {
@@ -24,13 +25,25 @@ export function isDataPreservationMode(): boolean {
 }
 
 /**
- * Strict Preservation Mode optionally locks down deliberate single-item permanent deletion
- * in the Recycle Bin. Disabled by default so users can still manually discard single trashed items,
- * but can be enabled via DATA_PRESERVATION_STRICT="true" | "1" | "enabled".
+ * Strict Preservation Mode locks down deliberate single-item permanent deletion
+ * in the Recycle Bin.
+ *
+ * SAFETY INVARIANT: Whenever Data Preservation Mode is active, strict preservation
+ * is TRUE BY DEFAULT. A missing or unset DATA_PRESERVATION_STRICT setting will NOT
+ * permit irreversible single-item Recycle Bin deletion.
+ *
+ * It is only deactivated if explicitly set to "false" | "disabled" | "off", or if
+ * overall Data Preservation Mode is disabled.
  */
 export function isStrictPreservationMode(): boolean {
+  if (!isDataPreservationMode()) {
+    return false;
+  }
   const envVal = process.env["DATA_PRESERVATION_STRICT"]?.trim().toLowerCase();
-  return envVal === "true" || envVal === "1" || envVal === "enabled";
+  if (envVal === "false" || envVal === "disabled" || envVal === "off") {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -71,7 +84,7 @@ export function assertBulkDeletionAllowed(operation: PreservationBlockedOperatio
       if (isStrictPreservationMode()) {
         throw new ApiError(
           423,
-          "Strict Data Preservation Mode is active: Permanent single-item deletion is disabled. Items remain safely preserved in the Recycle Bin.",
+          "Data Preservation Mode is active: Permanent single-item deletion is disabled. Items remain safely preserved in the Recycle Bin.",
           undefined,
           { code: "DATA_PRESERVATION_ACTIVE", operation },
         );

@@ -14,10 +14,12 @@ import {
   restoreAll,
 } from "@/lib/server/trash.server";
 import { deleteUserData } from "@/lib/server/api.server";
+import { Route as TrashListRoute } from "@/routes/api.trash";
 import { Route as EmptyRoute } from "@/routes/api.trash.empty";
 import { Route as CleanupRoute } from "@/routes/api.trash.cleanup";
 import { Route as DeleteDataRoute } from "@/routes/api.data.delete";
 import { Route as PermanentRoute } from "@/routes/api.trash.permanent";
+import { Route as DataSummaryRoute } from "@/routes/api.data.summary";
 
 describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   const originalEnv = { ...process.env };
@@ -28,7 +30,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   };
 
   beforeEach(() => {
-    process.env = { ...originalEnv };
+    process.env = { ...originalEnv, DATABASE_URL: "mysql://mock" };
     delete process.env["DATA_PRESERVATION_MODE"];
     delete process.env["DATA_PRESERVATION_STRICT"];
     delete (globalThis as any).__prisma;
@@ -36,7 +38,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 1. Safety Invariant: Defaults to Protected
+  // 1. Safety Invariant: Defaults to Protected and Strict by Default
   // ---------------------------------------------------------------------------
   describe("Preservation Mode Configuration & Safety Defaults", () => {
     it("defaults to ACTIVE (protected) when DATA_PRESERVATION_MODE is unset", () => {
@@ -72,19 +74,35 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(isDataPreservationMode()).toBe(false);
     });
 
-    it("defaults strict mode to FALSE unless explicitly enabled", () => {
-      expect(isStrictPreservationMode()).toBe(false);
+    it("defaults strict mode to TRUE whenever Data Preservation Mode is active, even if DATA_PRESERVATION_STRICT is missing", () => {
+      delete process.env["DATA_PRESERVATION_STRICT"];
+      expect(isDataPreservationMode()).toBe(true);
+      expect(isStrictPreservationMode()).toBe(true);
+
+      process.env["DATA_PRESERVATION_STRICT"] = "";
+      expect(isStrictPreservationMode()).toBe(true);
+
+      process.env["DATA_PRESERVATION_STRICT"] = "   ";
+      expect(isStrictPreservationMode()).toBe(true);
 
       process.env["DATA_PRESERVATION_STRICT"] = "true";
       expect(isStrictPreservationMode()).toBe(true);
+    });
 
-      process.env["DATA_PRESERVATION_STRICT"] = "1";
-      expect(isStrictPreservationMode()).toBe(true);
-
-      process.env["DATA_PRESERVATION_STRICT"] = "enabled";
-      expect(isStrictPreservationMode()).toBe(true);
-
+    it("strict mode is deactivated ONLY when DATA_PRESERVATION_STRICT is explicitly 'false', 'disabled', or 'off'", () => {
       process.env["DATA_PRESERVATION_STRICT"] = "false";
+      expect(isStrictPreservationMode()).toBe(false);
+
+      process.env["DATA_PRESERVATION_STRICT"] = "disabled";
+      expect(isStrictPreservationMode()).toBe(false);
+
+      process.env["DATA_PRESERVATION_STRICT"] = "off";
+      expect(isStrictPreservationMode()).toBe(false);
+    });
+
+    it("strict mode is always FALSE if overall Data Preservation Mode is disabled", () => {
+      process.env["DATA_PRESERVATION_MODE"] = "disabled";
+      process.env["DATA_PRESERVATION_STRICT"] = "true";
       expect(isStrictPreservationMode()).toBe(false);
     });
   });
@@ -216,32 +234,25 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 4. Single-Item Permanent Deletion & Strict Mode
+  // 4. Single-Item Permanent Deletion & Default Strict Protection
   // ---------------------------------------------------------------------------
-  describe("Single-Item Permanent Deletion & Strict Mode Behavior", () => {
-    it("allows deliberate single-item deletion in Recycle Bin when strict mode is false (default)", () => {
+  describe("Single-Item Permanent Deletion & Strict by Default Protection", () => {
+    it("blocks single-item permanent deletion BY DEFAULT when DATA_PRESERVATION_STRICT is missing", async () => {
+      delete process.env["DATA_PRESERVATION_STRICT"];
       expect(isDataPreservationMode()).toBe(true);
-      expect(isStrictPreservationMode()).toBe(false);
-
-      // Should NOT throw for single_permanent_delete
-      expect(() => assertBulkDeletionAllowed("single_permanent_delete")).not.toThrow();
-    });
-
-    it("blocks single-item permanent deletion when DATA_PRESERVATION_STRICT=true", async () => {
-      process.env["DATA_PRESERVATION_STRICT"] = "true";
       expect(isStrictPreservationMode()).toBe(true);
 
       expect(() => assertBulkDeletionAllowed("single_permanent_delete")).toThrowError(
-        /Strict Data Preservation Mode is active: Permanent single-item deletion is disabled/i,
+        /Data Preservation Mode is active: Permanent single-item deletion is disabled/i,
       );
 
       await expect(permanentlyDeleteItem(mockUser.id, "note", "note-uuid-1")).rejects.toThrowError(
-        /Strict Data Preservation Mode is active/i,
+        /Data Preservation Mode is active/i,
       );
     });
 
-    it("blocks /api/trash/permanent with HTTP 423 when strict mode is active", async () => {
-      process.env["DATA_PRESERVATION_STRICT"] = "true";
+    it("blocks /api/trash/permanent with HTTP 423 Locked BY DEFAULT", async () => {
+      delete process.env["DATA_PRESERVATION_STRICT"];
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
 
       const handlers = (PermanentRoute.options as any).server.handlers;
@@ -255,12 +266,77 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(res.status).toBe(423);
 
       const json = await res.json();
-      expect(json.error).toMatch(/Strict Data Preservation Mode is active/i);
+      expect(json.error).toMatch(/Data Preservation Mode is active/i);
+    });
+
+    it("allows deliberate single-item deletion ONLY when DATA_PRESERVATION_STRICT is explicitly set to 'false' or 'disabled'", () => {
+      process.env["DATA_PRESERVATION_STRICT"] = "disabled";
+      expect(isDataPreservationMode()).toBe(true);
+      expect(isStrictPreservationMode()).toBe(false);
+
+      expect(() => assertBulkDeletionAllowed("single_permanent_delete")).not.toThrow();
     });
   });
 
   // ---------------------------------------------------------------------------
-  // 5. Normal User Workflows Remain 100% Operational
+  // 5. API Status Propagation to UI (Recycle Bin & Settings)
+  // ---------------------------------------------------------------------------
+  describe("Preservation Status Propagation to UI API Endpoints", () => {
+    it("returns preservation_mode: true and strict_mode: true in /api/trash", async () => {
+      const mockPrisma = {
+        taskList: { findMany: vi.fn().mockResolvedValue([]) },
+        task: { findMany: vi.fn().mockResolvedValue([]) },
+        project: { findMany: vi.fn().mockResolvedValue([]) },
+        page: { findMany: vi.fn().mockResolvedValue([]) },
+        event: { findMany: vi.fn().mockResolvedValue([]) },
+        mindMap: { findMany: vi.fn().mockResolvedValue([]) },
+        routine: { findMany: vi.fn().mockResolvedValue([]) },
+        habit: { findMany: vi.fn().mockResolvedValue([]) },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (TrashListRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/trash", { method: "GET" });
+
+      const res = await handlers.GET({ request: req });
+      expect(res.status).toBe(200);
+
+      const json = await res.json();
+      expect(json.preservation_mode).toBe(true);
+      expect(json.strict_mode).toBe(true);
+    });
+
+    it("returns preservation_mode: true in /api/data/summary", async () => {
+      const mockPrisma = {
+        taskList: { count: vi.fn().mockResolvedValue(0) },
+        task: { count: vi.fn().mockResolvedValue(0) },
+        page: { count: vi.fn().mockResolvedValue(0) },
+        project: { count: vi.fn().mockResolvedValue(0) },
+        event: { count: vi.fn().mockResolvedValue(0) },
+        planActivity: { count: vi.fn().mockResolvedValue(0) },
+        mindMap: { count: vi.fn().mockResolvedValue(0) },
+        habit: { count: vi.fn().mockResolvedValue(0) },
+        routine: { count: vi.fn().mockResolvedValue(0) },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (DataSummaryRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/data/summary", { method: "GET" });
+
+      const res = await handlers.GET({ request: req });
+      expect(res.status).toBe(200);
+
+      const json = await res.json();
+      expect(json.preservation_mode).toBe(true);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 6. Normal User Workflows Remain 100% Operational
   // ---------------------------------------------------------------------------
   describe("Preservation of Ordinary User Workflows", () => {
     it("allows restoring an item from Recycle Bin while Preservation Mode is active", async () => {
@@ -334,7 +410,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 6. Explicit Bypass in Disabled Mode
+  // 7. Explicit Bypass in Disabled Mode
   // ---------------------------------------------------------------------------
   describe("Explicit Bypass when DATA_PRESERVATION_MODE='disabled'", () => {
     it("allows bulk operations when preservation mode is explicitly disabled", () => {
@@ -344,6 +420,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(() => assertBulkDeletionAllowed("workspace_deletion")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("empty_trash")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("auto_cleanup")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("single_permanent_delete")).not.toThrow();
     });
   });
 });
