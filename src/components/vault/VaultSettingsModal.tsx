@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ShieldCheck, KeyRound, Clock, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, KeyRound, Clock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { useVault } from "./VaultContext";
 import { toast } from "sonner";
 
@@ -32,8 +32,10 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showAccountPassword, setShowAccountPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -54,13 +56,18 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
       toast.error("New passwords do not match.");
       return;
     }
+    if (!accountPassword) {
+      toast.error("Please enter your MindDesk account password.");
+      return;
+    }
 
     setIsChangingPassword(true);
     try {
-      await changeMasterPassword(currentPassword, newPassword);
+      await changeMasterPassword(currentPassword, newPassword, accountPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setAccountPassword("");
       onOpenChange(false);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Failed to change master password.");
@@ -80,7 +87,8 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
             <DialogTitle className="text-base font-semibold">Vault Security Settings</DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            Manage your master password and auto-lock security preferences.
+            Manage your master password, account re-authentication, and auto-lock security
+            preferences.
           </DialogDescription>
         </DialogHeader>
 
@@ -206,13 +214,62 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
               />
             </div>
 
+            {/* MindDesk Account Password (Identity Re-Authentication) */}
+            <div className="space-y-1.5 pt-1 border-t border-border/50">
+              <Label
+                htmlFor="account-password"
+                className="text-xs flex items-center justify-between"
+              >
+                <span>MindDesk Account Password</span>
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  Re-authentication
+                </span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="account-password"
+                  type={showAccountPassword ? "text" : "password"}
+                  placeholder="Enter your MindDesk login password"
+                  value={accountPassword}
+                  onChange={(e) => setAccountPassword(e.target.value)}
+                  className="pr-10 text-xs"
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAccountPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showAccountPassword ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
             <Button
               type="submit"
               size="sm"
-              disabled={isChangingPassword || !currentPassword || !newPassword}
-              className="w-full text-xs gap-1.5 h-8 mt-1"
+              disabled={
+                isChangingPassword ||
+                !currentPassword ||
+                !newPassword ||
+                !confirmPassword ||
+                !accountPassword
+              }
+              className="w-full text-xs gap-1.5 h-8 mt-2"
             >
-              {isChangingPassword ? "Rewrapping Keys..." : "Update Master Password"}
+              {isChangingPassword ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Verifying & Rewrapping...
+                </>
+              ) : (
+                "Update Master Password"
+              )}
             </Button>
           </form>
         </div>

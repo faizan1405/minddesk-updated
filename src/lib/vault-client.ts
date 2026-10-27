@@ -65,6 +65,7 @@ export async function changeVaultPasswordApi(data: {
   wrapped_key: string;
   wrapped_key_iv: string;
   expected_version: number;
+  account_password: string;
 }): Promise<{ success: boolean; version: number }> {
   return api<{ success: boolean; version: number }>("/api/vault/password", {
     method: "POST",

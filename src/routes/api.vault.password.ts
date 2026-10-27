@@ -6,6 +6,7 @@ const RewrapInput = z.object({
   wrapped_key: z.string().min(16),
   wrapped_key_iv: z.string().min(12).max(64),
   expected_version: z.number().int().min(1),
+  account_password: z.string().min(1, "Account password is required").max(200),
 });
 
 export const Route = createFileRoute("/api/vault/password")({
@@ -13,9 +14,34 @@ export const Route = createFileRoute("/api/vault/password")({
     handlers: {
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
+        const { checkRateLimit, recordFailedAttempt, resetRateLimit, extractClientIp } =
+          await import("@/lib/server/rate-limiter.server");
+
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const body = RewrapInput.parse(await api.readJson(request));
+
+          const clientIp = extractClientIp(request);
+          const ipKey = `vault_pw:ip:${clientIp}`;
+          const userKey = `vault_pw:user:${user.id}`;
+
+          // Rate-limit re-authentication attempts before verifying password
+          await checkRateLimit([ipKey, userKey], "re-authentication attempts");
+
+          // Verify current MindDesk account password
+          const isValidAccountPassword = await api.verifyPassword(
+            body.account_password,
+            user.passwordHash,
+          );
+
+          if (!isValidAccountPassword) {
+            await recordFailedAttempt(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
+            await recordFailedAttempt(userKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
+            throw new api.ApiError(401, "Incorrect account password.");
+          }
+
+          // Reset rate limits on successful account authentication
+          await resetRateLimit([ipKey, userKey]);
 
           // P1: Atomic version-checked optimistic concurrency update
           const result = await api.db().vaultMeta.updateMany({

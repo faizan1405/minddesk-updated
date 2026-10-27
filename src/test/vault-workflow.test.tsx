@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
@@ -480,7 +481,11 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
 
       await expect(
         act(async () => {
-          await vault.current.changeMasterPassword("WrongCurrentPassword!", "NewValidPassword123!");
+          await vault.current.changeMasterPassword(
+            "WrongCurrentPassword!",
+            "NewValidPassword123!",
+            "AccountPass123!",
+          );
         }),
       ).rejects.toThrow("Current master password is incorrect");
 
@@ -488,22 +493,46 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
       expect(apiSpy).not.toHaveBeenCalled();
     });
 
-    it("successfully changes master password when current password is verified locally", async () => {
+    it("rejects password change if account password is missing", async () => {
+      const vault = await setupUnlockedVault();
+      const apiSpy = vi.spyOn(vaultClient, "changeVaultPasswordApi");
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword("MasterPass123!", "NewValidPassword123!", "");
+        }),
+      ).rejects.toThrow("Please enter your MindDesk account password");
+
+      expect(apiSpy).not.toHaveBeenCalled();
+    });
+
+    it("successfully changes master password when current password and account password are provided", async () => {
       const vault = await setupUnlockedVault();
 
-      const apiSpy = vi.spyOn(vaultClient, "changeVaultPasswordApi").mockResolvedValue({
-        success: true,
-        version: 2,
-      });
+      let capturedPayload: any = null;
+      const apiSpy = vi
+        .spyOn(vaultClient, "changeVaultPasswordApi")
+        .mockImplementation(async (payload) => {
+          capturedPayload = payload;
+          return {
+            success: true,
+            version: 2,
+          };
+        });
 
       await act(async () => {
         // "MasterPass123!" was used in setupUnlockedVault
-        await vault.current.changeMasterPassword("MasterPass123!", "BrandNewMasterPass456!");
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
       });
 
       expect(apiSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           expected_version: 1,
+          account_password: "AccountPass123!",
           salt: expect.any(String),
           wrapped_key: expect.any(String),
           wrapped_key_iv: expect.any(String),
@@ -511,6 +540,28 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
       );
 
       expect(vault.current.vaultMeta?.version).toBe(2);
+
+      // Verify cryptographic self-check: new master password unwraps the new wrapped key,
+      // and old master password no longer unwraps it!
+      const { unlockVault } = await import("@/lib/vault-crypto");
+      const unwrappedWithNew = await unlockVault(
+        "BrandNewMasterPass456!",
+        capturedPayload.salt,
+        capturedPayload.wrapped_key,
+        capturedPayload.wrapped_key_iv,
+      );
+      expect(unwrappedWithNew).toBeDefined();
+      expect(unwrappedWithNew.length).toBe(32);
+
+      // Old master password fails to unwrap the newly rewrapped key
+      await expect(
+        unlockVault(
+          "MasterPass123!",
+          capturedPayload.salt,
+          capturedPayload.wrapped_key,
+          capturedPayload.wrapped_key_iv,
+        ),
+      ).rejects.toThrow();
     });
 
     it("handles 409 conflict when master password was modified from another device", async () => {
@@ -523,7 +574,11 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
 
       await expect(
         act(async () => {
-          await vault.current.changeMasterPassword("MasterPass123!", "BrandNewMasterPass456!");
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
         }),
       ).rejects.toMatchObject({ status: 409 });
     });

@@ -106,7 +106,11 @@ interface VaultContextType {
   setupVault: (masterPassword: string) => Promise<void>;
   unlockVault: (masterPassword: string) => Promise<boolean>;
   lockVault: () => void;
-  changeMasterPassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  changeMasterPassword: (
+    currentPassword: string,
+    newPassword: string,
+    accountPassword?: string,
+  ) => Promise<void>;
 
   // Password operations
   savePassword: (data: PasswordEntryData, id?: string, expectedVersion?: number) => Promise<void>;
@@ -476,9 +480,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [user, vaultMeta, timeoutMinutes, loadVaultData],
   );
 
-  // Change master password with local verification and optimistic concurrency protection
+  // Change master password with local verification, account password re-auth, and optimistic concurrency protection
   const changeMasterPassword = useCallback(
-    async (currentPassword: string, newPassword: string) => {
+    async (currentPassword: string, newPassword: string, accountPassword?: string) => {
       if (
         !rootKeyRef.current ||
         !vaultMeta ||
@@ -493,6 +497,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
       if (!newPassword || newPassword.length < 8) {
         throw new Error("New master password must be at least 8 characters.");
+      }
+      if (!accountPassword) {
+        throw new Error("Please enter your MindDesk account password.");
       }
 
       const gen = unlockGenerationRef.current;
@@ -531,12 +538,38 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Vault locked during password change.");
       }
 
+      // 3. Local Self-Unwrap Verification: Verify locally that new master password successfully unwraps
+      // the new wrapped key, and verify that the unwrapped key bytes match existing root encryption key
+      const verifiedUnwrappedKey = await unlockVault(
+        newPassword,
+        rewrapped.saltHex,
+        rewrapped.wrappedKey,
+        rewrapped.wrappedKeyIv,
+        {
+          iterations: vaultMeta.iterations,
+          memoryCost: vaultMeta.memory_cost,
+          parallelism: vaultMeta.parallelism,
+        },
+      );
+
+      const rootKey = rootKeyRef.current;
+      if (
+        !rootKey ||
+        verifiedUnwrappedKey.length !== rootKey.length ||
+        !verifiedUnwrappedKey.every((byte, idx) => byte === rootKey[idx])
+      ) {
+        throw new Error(
+          "Cryptographic self-check failed: newly wrapped key does not match root key. Update aborted for safety.",
+        );
+      }
+
       try {
         const res = await changeVaultPasswordApi({
           salt: rewrapped.saltHex,
           wrapped_key: rewrapped.wrappedKey,
           wrapped_key_iv: rewrapped.wrappedKeyIv,
           expected_version: vaultMeta.version,
+          account_password: accountPassword,
         });
 
         if (unlockGenerationRef.current !== gen) return;
@@ -555,13 +588,36 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
         toast.success("Master password updated successfully.");
       } catch (err: unknown) {
-        const errorObj = err as { status?: number; message?: string };
-        if (
-          errorObj?.status === 409 ||
-          errorObj?.message?.includes("Conflict") ||
-          errorObj?.message?.includes("409")
-        ) {
+        const errorObj = err as { status?: number; message?: string; error?: string };
+        const msg = errorObj?.error || errorObj?.message || "";
+
+        // Safe recovery check: if network dropped ambiguously, verify if the server actually committed the change
+        if (isAmbiguousNetworkError(err)) {
+          try {
+            const latestMeta = await fetchVaultMeta();
+            if (
+              latestMeta.initialized &&
+              latestMeta.version === vaultMeta.version + 1 &&
+              latestMeta.wrapped_key === rewrapped.wrappedKey
+            ) {
+              if (unlockGenerationRef.current !== gen) return;
+              setVaultMeta(latestMeta);
+              toast.success(
+                "Master password updated successfully (verified after network reconnection).",
+              );
+              return;
+            }
+          } catch {
+            // Best effort recovery check
+          }
+        }
+
+        if (errorObj?.status === 409 || msg.includes("Conflict") || msg.includes("409")) {
           toast.error("Conflict: Master password was changed from another session. Please reload.");
+        } else if (errorObj?.status === 401 || msg.includes("account password")) {
+          toast.error("Incorrect MindDesk account password.");
+        } else if (errorObj?.status === 429 || msg.includes("Too many")) {
+          toast.error(msg || "Too many attempts. Please try again later.");
         }
         throw err;
       }

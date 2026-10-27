@@ -170,6 +170,27 @@ ALTER TABLE `vault_document_attachments` ADD CONSTRAINT `vault_document_attachme
 ALTER TABLE `vault_document_attachments` ADD CONSTRAINT `vault_document_attachments_user_id_fkey` FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 ```
 
+### Migration 0012 (`0012_auth_rate_limits`) — Persistent Brute-Force & Rate-Limit Protection
+This additive migration creates the `auth_rate_limits` table for persistent IP and account rate limiting across Node.js restarts and multi-process deployments.
+*(Note: MindDesk includes automatic in-memory fallback, so the application continues functioning smoothly even before this table is created).*
+
+Run this SQL in phpMyAdmin if applying manually:
+```sql
+CREATE TABLE `auth_rate_limits` (
+    `id` CHAR(36) NOT NULL,
+    `key` VARCHAR(128) NOT NULL,
+    `points` INTEGER NOT NULL DEFAULT 1,
+    `first_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `last_at` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    `blocked_until` DATETIME(3) NULL,
+
+    UNIQUE INDEX `auth_rate_limits_key_key`(`key`),
+    INDEX `auth_rate_limits_blocked_until_idx`(`blocked_until`),
+    INDEX `auth_rate_limits_last_at_idx`(`last_at`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
 ### Previous Migrations Reference:
 - Migration 0006 (`0006_habits_routines`): adds `routines`, `habits` and `habit_completions` tables.
 - Migration 0007 (`0007_settings`): adds `display_name` column to `users` and `user_settings` table.

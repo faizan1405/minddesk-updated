@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Prisma } from "@prisma/client";
 import * as apiServer from "@/lib/server/api.server";
 import * as vaultStorage from "@/lib/server/vault-storage.server";
 import { Route as VaultMetaRoute } from "@/routes/api.vault.meta";
@@ -108,10 +109,42 @@ describe("My Private Vault API Endpoints", () => {
       const res = await handlers.POST({ request: req });
       expect(res.status).toBe(409);
     });
+
+    it("returns descriptive 500 error when database table is missing (P2021)", async () => {
+      const p2021Error = new Prisma.PrismaClientKnownRequestError(
+        "Table minddesk.vault_meta does not exist",
+        { code: "P2021", clientVersion: "6.0.0", meta: { table: "vault_meta" } },
+      );
+      const mockPrisma = {
+        vaultMeta: {
+          findUnique: vi.fn().mockRejectedValue(p2021Error),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultMetaRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/meta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salt: "0123456789abcdef0123456789abcdef",
+          wrapped_key: "wrappedKeyBase64String",
+          wrapped_key_iv: "wrappedKeyIvBase64String",
+        }),
+      });
+
+      const res = await handlers.POST({ request: req });
+      const json = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(json.error).toContain("Database table not found (vault_meta)");
+      expect(json.error).toContain("0011_my_private_vault");
+    });
   });
 
   describe("POST /api/vault/password", () => {
-    it("updates wrapped key with atomic version-checked update", async () => {
+    it("updates wrapped key when correct account password is provided", async () => {
       const mockPrisma = {
         vaultMeta: {
           updateMany: vi.fn().mockResolvedValue({ count: 1 }),
@@ -123,6 +156,7 @@ describe("My Private Vault API Endpoints", () => {
       };
       (globalThis as any).__prisma = mockPrisma;
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+      vi.spyOn(apiServer, "verifyPassword").mockResolvedValue(true);
 
       const handlers = (VaultPasswordRoute.options as any).server.handlers;
       const req = new Request("http://localhost/api/vault/password", {
@@ -133,6 +167,7 @@ describe("My Private Vault API Endpoints", () => {
           wrapped_key: "newWrappedKeyBase64",
           wrapped_key_iv: "newWrappedKeyIvBase64",
           expected_version: 1,
+          account_password: "ValidAccountPassword123!",
         }),
       });
 
@@ -148,14 +183,38 @@ describe("My Private Vault API Endpoints", () => {
       });
     });
 
-    it("rejects concurrent master password changes with 409 Conflict", async () => {
+    it("rejects master password change if account password is incorrect without touching vault metadata", async () => {
       const mockPrisma = {
         vaultMeta: {
-          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
-          findUnique: vi.fn().mockResolvedValue({ userId: mockUser.id, version: 2 }),
+          updateMany: vi.fn(),
         },
       };
       (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+      vi.spyOn(apiServer, "verifyPassword").mockResolvedValue(false);
+
+      const handlers = (VaultPasswordRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salt: "newSaltHex1234567890abcdef123456",
+          wrapped_key: "newWrappedKeyBase64",
+          wrapped_key_iv: "newWrappedKeyIvBase64",
+          expected_version: 1,
+          account_password: "WrongAccountPassword!",
+        }),
+      });
+
+      const res = await handlers.POST({ request: req });
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toContain("Incorrect account password");
+      expect(mockPrisma.vaultMeta.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("rejects request missing account_password with 400 Bad Request", async () => {
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
 
       const handlers = (VaultPasswordRoute.options as any).server.handlers;
@@ -167,6 +226,34 @@ describe("My Private Vault API Endpoints", () => {
           wrapped_key: "newWrappedKeyBase64",
           wrapped_key_iv: "newWrappedKeyIvBase64",
           expected_version: 1,
+        }),
+      });
+
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects concurrent master password changes with 409 Conflict", async () => {
+      const mockPrisma = {
+        vaultMeta: {
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findUnique: vi.fn().mockResolvedValue({ userId: mockUser.id, version: 2 }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+      vi.spyOn(apiServer, "verifyPassword").mockResolvedValue(true);
+
+      const handlers = (VaultPasswordRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          salt: "newSaltHex1234567890abcdef123456",
+          wrapped_key: "newWrappedKeyBase64",
+          wrapped_key_iv: "newWrappedKeyIvBase64",
+          expected_version: 1,
+          account_password: "ValidAccountPassword123!",
         }),
       });
 
