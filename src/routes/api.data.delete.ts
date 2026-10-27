@@ -15,8 +15,11 @@ export const Route = createFileRoute("/api/data/delete")({
           acquireAdmission,
         } = await import("@/lib/server/rate-limiter.server");
         const { z } = await import("zod");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
 
         return api.handle(async () => {
+          assertBulkDeletionAllowed("workspace_deletion");
+
           const user = await api.requireUser(request);
           const b = z
             .object({ password: z.string().min(1).max(200), confirm: z.literal("DELETE") })

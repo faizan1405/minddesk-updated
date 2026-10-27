@@ -643,6 +643,8 @@ export async function exportUserData(user: {
  *   and encrypted document files in storage/vault-documents remain strictly untouched).
  */
 export async function deleteUserData(userId: string) {
+  const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
+  assertBulkDeletionAllowed("workspace_deletion");
   const p = db();
   const where = { userId };
   await p.$transaction([

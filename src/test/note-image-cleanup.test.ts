@@ -27,6 +27,7 @@ describe("MindDesk — Non-Destructive Protection & Zero Data Loss Guarantees", 
       ...originalEnv,
       STORAGE_DIR: tempTestStorageDir,
       DATABASE_URL: "mysql://mock",
+      DATA_PRESERVATION_MODE: "disabled",
     };
     delete (globalThis as any).__prisma;
     vi.restoreAllMocks();
