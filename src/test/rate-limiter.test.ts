@@ -9,8 +9,11 @@ import {
   recordFailedAttempt,
   resetRateLimit,
   cleanupRateLimits,
+  acquireAdmission,
+  getRateLimiterStatus,
   _resetRateLimiterForTesting,
   _getMemoryCacheSizeForTesting,
+  _getInFlightCountForTesting,
 } from "@/lib/server/rate-limiter.server";
 import { Prisma } from "@prisma/client";
 
@@ -246,6 +249,73 @@ describe("Rate Limiter Engine & IP Extraction", () => {
     it("prunes stale entries during cleanup", async () => {
       const cleaned = await cleanupRateLimits();
       expect(typeof cleaned).toBe("number");
+    });
+
+    it("distinguishes transient connection errors from missing table, keeping persistence enabled for future queries", async () => {
+      const connError = new Prisma.PrismaClientKnownRequestError(
+        "Can't reach database server at localhost:3306",
+        { code: "P1001", clientVersion: "6.0.0" },
+      );
+
+      const mockPrisma = {
+        authRateLimit: {
+          findMany: vi.fn().mockRejectedValue(connError),
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        $transaction: vi.fn().mockRejectedValue(connError),
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      process.env["DATABASE_URL"] = "mysql://mock:mock@localhost:3306/mock";
+
+      const key = "test:transient:drop";
+      // Transient error should fall back for this attempt without permanently disabling persistent mode
+      const result = await recordFailedAttempt(key, 5, 60000, 60000);
+      expect(result.points).toBe(1);
+
+      const status = getRateLimiterStatus();
+      // Persistence flag must remain true because table is not missing!
+      expect(status.persistent).toBe(true);
+    });
+  });
+
+  describe("Pre-Verification Admission Throttling (In-Flight Concurrency)", () => {
+    it("admits concurrent operations up to threshold and throttles parallel bursts exceeding limits", () => {
+      const accountKey = "login:account:victim@example.com";
+      const ipKey = "login:ip:198.51.100.22";
+
+      // Account limit is 2 concurrent in-flight verifications
+      const release1 = acquireAdmission([ipKey, accountKey]);
+      const release2 = acquireAdmission([ipKey, accountKey]);
+
+      expect(_getInFlightCountForTesting(accountKey)).toBe(2);
+
+      // 3rd concurrent request for the same account must be immediately rejected with 429
+      expect(() => acquireAdmission([ipKey, accountKey])).toThrowError(
+        /Too many simultaneous authentication requests/,
+      );
+
+      // When an in-flight operation completes and releases its token, admission opens up
+      release1();
+      expect(_getInFlightCountForTesting(accountKey)).toBe(1);
+
+      // Now another request can be admitted cleanly
+      const release3 = acquireAdmission([ipKey, accountKey]);
+      expect(_getInFlightCountForTesting(accountKey)).toBe(2);
+
+      release2();
+      release3();
+      expect(_getInFlightCountForTesting(accountKey)).toBe(0);
+    });
+
+    it("enforces independent in-flight limits for distinct accounts from different IPs", () => {
+      const releaseA = acquireAdmission(["login:ip:10.0.0.1", "login:account:userA@example.com"]);
+      const releaseB = acquireAdmission(["login:ip:10.0.0.2", "login:account:userB@example.com"]);
+
+      expect(_getInFlightCountForTesting("login:account:userA@example.com")).toBe(1);
+      expect(_getInFlightCountForTesting("login:account:userB@example.com")).toBe(1);
+
+      releaseA();
+      releaseB();
     });
   });
 });

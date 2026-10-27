@@ -249,4 +249,67 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
     const res = await handlers.POST({ request: reqNewIp });
     expect(res.status).toBe(429);
   });
+
+  it("throttles parallel bursts of requests with 429 admission control before executing expensive scrypt hashing", async () => {
+    const pendingResolvers: Array<() => void> = [];
+    const mockPrisma = {
+      user: {
+        count: vi.fn().mockResolvedValue(1),
+        findUnique: vi.fn().mockResolvedValue(mockUser),
+      },
+      authRateLimit: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    (globalThis as any).__prisma = mockPrisma;
+
+    // Simulate in-flight scrypt password verification so requests overlap
+    vi.spyOn(apiServer, "verifyPassword").mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          pendingResolvers.push(() => resolve(false));
+        }),
+    );
+
+    const handlers = (LoginRoute.options as any).server.handlers;
+
+    // Send 3 requests simultaneously (Account limit is 2 in-flight)
+    const p1 = handlers.POST({
+      request: new Request("http://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.80" },
+        body: JSON.stringify({ email: "owner@example.com", password: "BurstGuess1" }),
+      }),
+    });
+
+    const p2 = handlers.POST({
+      request: new Request("http://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.80" },
+        body: JSON.stringify({ email: "owner@example.com", password: "BurstGuess2" }),
+      }),
+    });
+
+    const p3 = handlers.POST({
+      request: new Request("http://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.80" },
+        body: JSON.stringify({ email: "owner@example.com", password: "BurstGuess3" }),
+      }),
+    });
+
+    // p3 must be rejected immediately with 429 due to in-flight admission limit!
+    const res3 = await p3;
+    expect(res3.status).toBe(429);
+    const json3 = await res3.json();
+    expect(json3.error).toContain("Too many simultaneous authentication requests");
+
+    // Complete the first two in-flight requests
+    pendingResolvers.forEach((fn) => fn());
+    const res1 = await p1;
+    const res2 = await p2;
+    expect(res1.status).toBe(401);
+    expect(res2.status).toBe(401);
+  });
 });

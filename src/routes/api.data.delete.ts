@@ -6,8 +6,13 @@ export const Route = createFileRoute("/api/data/delete")({
       // Deletes all workspace content of the signed-in user (account, sign-in and preferences stay).
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
-        const { checkRateLimit, recordFailedAttempt, resetRateLimit, extractClientIp } =
-          await import("@/lib/server/rate-limiter.server");
+        const {
+          checkRateLimit,
+          recordFailedAttempt,
+          resetRateLimit,
+          extractClientIp,
+          acquireAdmission,
+        } = await import("@/lib/server/rate-limiter.server");
         const { z } = await import("zod");
 
         return api.handle(async () => {
@@ -20,17 +25,22 @@ export const Route = createFileRoute("/api/data/delete")({
           const ipKey = `delete_auth:ip:${clientIp}`;
           const userKey = `delete_auth:user:${user.id}`;
 
-          await checkRateLimit([ipKey, userKey], "re-authentication attempts");
+          const releaseAdmission = acquireAdmission([ipKey, userKey]);
+          try {
+            await checkRateLimit([ipKey, userKey], "re-authentication attempts");
 
-          if (!(await api.verifyPassword(b.password, user.passwordHash))) {
-            await recordFailedAttempt(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
-            await recordFailedAttempt(userKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
-            throw new api.ApiError(400, "Password is incorrect");
+            if (!(await api.verifyPassword(b.password, user.passwordHash))) {
+              await recordFailedAttempt(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
+              await recordFailedAttempt(userKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
+              throw new api.ApiError(400, "Password is incorrect");
+            }
+
+            await resetRateLimit([userKey]);
+            await api.deleteUserData(user.id);
+            return api.json({ ok: true });
+          } finally {
+            releaseAdmission();
           }
-
-          await resetRateLimit([userKey]);
-          await api.deleteUserData(user.id);
-          return api.json({ ok: true });
         });
       },
     },

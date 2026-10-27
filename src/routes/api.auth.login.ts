@@ -15,8 +15,13 @@ export const Route = createFileRoute("/api/auth/login")({
     handlers: {
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
-        const { checkRateLimit, recordFailedAttempt, resetRateLimit, extractClientIp } =
-          await import("@/lib/server/rate-limiter.server");
+        const {
+          checkRateLimit,
+          recordFailedAttempt,
+          resetRateLimit,
+          extractClientIp,
+          acquireAdmission,
+        } = await import("@/lib/server/rate-limiter.server");
 
         return api.handle(async () => {
           await api.bootstrapOwnerAccount();
@@ -26,28 +31,34 @@ export const Route = createFileRoute("/api/auth/login")({
           const ipKey = `login:ip:${clientIp}`;
           const accountKey = `login:account:${email}`;
 
-          // 1. Check rate limits before executing expensive scrypt hashing
-          await checkRateLimit([ipKey, accountKey], "login attempts");
+          // Pre-verification admission: limit concurrent in-flight scrypt hashing operations per IP and account
+          const releaseAdmission = acquireAdmission([ipKey, accountKey]);
+          try {
+            // 1. Check rate limits before executing expensive scrypt hashing
+            await checkRateLimit([ipKey, accountKey], "login attempts");
 
-          const user = await api.db().user.findUnique({ where: { email } });
-          const isValid = user
-            ? await api.verifyPassword(password, user.passwordHash)
-            : await api.verifyPassword(password, DUMMY_HASH);
+            const user = await api.db().user.findUnique({ where: { email } });
+            const isValid = user
+              ? await api.verifyPassword(password, user.passwordHash)
+              : await api.verifyPassword(password, DUMMY_HASH);
 
-          if (!user || !isValid) {
-            // 2. Record failed attempt: 10 max per IP, 5 max per account in 15 minutes
-            await recordFailedAttempt(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
-            await recordFailedAttempt(accountKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
-            throw new api.ApiError(401, "Incorrect email or password.");
+            if (!user || !isValid) {
+              // 2. Record failed attempt: 10 max per IP, 5 max per account in 15 minutes
+              await recordFailedAttempt(ipKey, 10, 15 * 60 * 1000, 15 * 60 * 1000);
+              await recordFailedAttempt(accountKey, 5, 15 * 60 * 1000, 15 * 60 * 1000);
+              throw new api.ApiError(401, "Incorrect email or password.");
+            }
+
+            // 3. Successful login: reset failed counters for this account ONLY.
+            // Never reset IP rate limit counter on login to prevent attackers with valid credentials
+            // from resetting IP rate limits while brute-forcing other accounts.
+            await resetRateLimit([accountKey]);
+
+            const cookie = await api.createSession(user.id);
+            return api.json({ user: api.userDto(user) }, { headers: { "set-cookie": cookie } });
+          } finally {
+            releaseAdmission();
           }
-
-          // 3. Successful login: reset failed counters for this account ONLY.
-          // Never reset IP rate limit counter on login to prevent attackers with valid credentials
-          // from resetting IP rate limits while brute-forcing other accounts.
-          await resetRateLimit([accountKey]);
-
-          const cookie = await api.createSession(user.id);
-          return api.json({ user: api.userDto(user) }, { headers: { "set-cookie": cookie } });
         });
       },
     },

@@ -1,5 +1,6 @@
 // Server-side persistent & in-memory rate limiter for brute-force and credential stuffing protection.
-// Authoritative MySQL storage with row-level locking, Hostinger trusted-proxy policy, and resilient in-memory fallback.
+// Authoritative MySQL storage with row-level locking, race-safe key initialization, retry handling,
+// in-flight admission concurrency throttling, Hostinger trusted-proxy policy, and resilient in-memory fallback.
 import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 import { Prisma } from "@prisma/client";
@@ -18,14 +19,23 @@ export const DEFAULT_MAX_LOGIN_IP_ATTEMPTS = 10;
 export const DEFAULT_MAX_LOGIN_ACCOUNT_ATTEMPTS = 5;
 export const DEFAULT_MAX_REAUTH_ATTEMPTS = 5;
 
+// In-flight concurrency limits to prevent parallel scrypt CPU exhaustion bursts
+export const MAX_IN_FLIGHT_AUTH_PER_IP = 5;
+export const MAX_IN_FLIGHT_AUTH_PER_ACCOUNT = 2;
+const IN_FLIGHT_TIMEOUT_MS = 15 * 1000; // 15-second safety auto-release
+
 // In-memory bounded LRU / sliding cache
 const memoryCache = new Map<string, RateLimitEntry>();
 const MAX_MEMORY_ENTRIES = 5000;
 let dbTableAvailable = true;
 let warnedMissingTable = false;
 
+// In-flight concurrency tracker: key -> Array of start timestamps
+const inFlightRequests = new Map<string, number[]>();
+
 export function _resetRateLimiterForTesting() {
   memoryCache.clear();
+  inFlightRequests.clear();
   dbTableAvailable = true;
   warnedMissingTable = false;
 }
@@ -36,6 +46,26 @@ export function _getMemoryCacheSizeForTesting(): number {
 
 export function _getMemoryCacheEntryForTesting(key: string): RateLimitEntry | undefined {
   return memoryCache.get(key);
+}
+
+export function _getInFlightCountForTesting(key: string): number {
+  const list = inFlightRequests.get(key) || [];
+  const now = Date.now();
+  return list.filter((ts) => now - ts < IN_FLIGHT_TIMEOUT_MS).length;
+}
+
+export function getRateLimiterStatus(): {
+  persistent: boolean;
+  mode: "mysql" | "memory";
+  memoryEntries: number;
+  activeInFlightKeys: number;
+} {
+  return {
+    persistent: dbTableAvailable && Boolean(process.env["DATABASE_URL"]),
+    mode: dbTableAvailable && Boolean(process.env["DATABASE_URL"]) ? "mysql" : "memory",
+    memoryEntries: memoryCache.size,
+    activeInFlightKeys: inFlightRequests.size,
+  };
 }
 
 /**
@@ -87,7 +117,7 @@ export type TrustedProxyStrategy = "hostinger" | "cloudflare" | "forwarded" | "n
  * Resolves the active trusted-proxy policy.
  * Configured via TRUST_PROXY env var ("hostinger" | "cloudflare" | "forwarded" | "none").
  * Default:
- * - Production: "hostinger" (trusts only X-Real-IP set by OpenLiteSpeed/Nginx reverse proxy).
+ * - Production: "hostinger" (trusts only X-Real-IP set by LiteSpeed/Nginx reverse proxy).
  * - Development/Test: "none" (does not trust spoofable headers unless explicitly configured).
  */
 export function getTrustedProxyStrategy(): TrustedProxyStrategy {
@@ -107,16 +137,16 @@ export function getTrustedProxyStrategy(): TrustedProxyStrategy {
  * Safely extracts client IP according to the trusted reverse-proxy policy.
  *
  * Hostinger Policy ("hostinger"):
- * - OpenLiteSpeed/Nginx runs locally on Hostinger and sets X-Real-IP to the connecting client's $remote_addr.
+ * - Hostinger uses LiteSpeed Web Server (LSWS) acting as reverse proxy to Node.js.
+ * - Under standard Hostinger reverse proxy, X-Real-IP is set to $remote_addr.
  * - CF-Connecting-IP and X-Forwarded-For are strictly ignored because arbitrary clients can inject them
  *   unless Cloudflare origin pull is authenticated.
  * - If X-Real-IP is absent or invalid, returns "untrusted-proxy-client".
  *
- * Cloudflare Policy ("cloudflare"):
- * - Reads CF-Connecting-IP when explicitly verified behind Cloudflare.
- *
- * None Policy ("none"):
- * - Direct connection / dev; forwarding headers are not trusted. Falls back to "127.0.0.1".
+ * Conservative Security Note:
+ * - Because Hostinger LiteSpeed internal configuration cannot be verified from within Node.js without
+ *   root access, account-level rate limiting and in-flight admission control are enforced simultaneously
+ *   and do not rely on IP address guarantees.
  */
 export function extractClientIp(request: Request): string {
   const strategy = getTrustedProxyStrategy();
@@ -185,15 +215,108 @@ export function createRateLimitError(
   );
 }
 
-function isMissingTableError(err: unknown): boolean {
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2021") return true;
+/**
+ * Pre-verification Admission Controller:
+ * Limits the number of simultaneously in-flight authentication operations per IP and account.
+ * This prevents parallel bursts from bypassing rate checks before failed attempts are committed,
+ * and eliminates CPU exhaustion attacks targeting expensive scrypt operations.
+ *
+ * Returns a release function that MUST be invoked in a finally block.
+ */
+export function acquireAdmission(keys: string[]): () => void {
+  const now = Date.now();
+
+  // 1. Check in-flight thresholds
+  for (const key of keys) {
+    let list = inFlightRequests.get(key) || [];
+    // Filter out expired reservations
+    list = list.filter((ts) => now - ts < IN_FLIGHT_TIMEOUT_MS);
+    inFlightRequests.set(key, list);
+
+    const limit =
+      key.includes(":account:") || key.includes(":user:")
+        ? MAX_IN_FLIGHT_AUTH_PER_ACCOUNT
+        : MAX_IN_FLIGHT_AUTH_PER_IP;
+
+    if (list.length >= limit) {
+      throw new ApiError(
+        429,
+        "Too many simultaneous authentication requests. Please wait a moment and try again.",
+        {
+          "retry-after": "5",
+          "cache-control": "no-store",
+        },
+        { retryAfter: 5 },
+      );
+    }
+  }
+
+  // 2. Reserve admission slots
+  const reservationId = now;
+  for (const key of keys) {
+    const list = inFlightRequests.get(key) || [];
+    list.push(reservationId);
+    inFlightRequests.set(key, list);
+  }
+
+  // 3. Return safe release function
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    for (const key of keys) {
+      const list = inFlightRequests.get(key);
+      if (list) {
+        const idx = list.indexOf(reservationId);
+        if (idx !== -1) {
+          list.splice(idx, 1);
+        }
+        if (list.length === 0) {
+          inFlightRequests.delete(key);
+        } else {
+          inFlightRequests.set(key, list);
+        }
+      }
+    }
+  };
+}
+
+/**
+ * Identifies strictly genuine missing-table errors.
+ * Never misclassifies connection drops, syntax errors, or deadlocks as missing tables.
+ */
+function isGenuineMissingTableError(err: unknown): boolean {
+  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2021") {
+    return true;
+  }
   if (err && typeof err === "object") {
-    const e = err as { code?: string; errno?: number; message?: string };
-    if (e.code === "ER_NO_SUCH_TABLE" || e.errno === 1146) return true;
+    const e = err as { code?: string; errno?: number };
+    if (e.code === "ER_NO_SUCH_TABLE" || e.errno === 1146) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Identifies transient, retryable MySQL / database concurrency errors.
+ */
+function isRetryableConcurrencyError(err: unknown): boolean {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    // P2034: transaction failed due to deadlock/write conflict
+    // P2002: unique constraint race on simultaneous insert
+    if (err.code === "P2034" || err.code === "P2002") return true;
+  }
+  if (err && typeof err === "object") {
+    const e = err as { code?: string; errno?: number };
+    // 1213: ER_LOCK_DEADLOCK, 1205: ER_LOCK_WAIT_TIMEOUT, 1062: ER_DUP_ENTRY
     if (
-      typeof e.message === "string" &&
-      (e.message.includes("auth_rate_limits") ||
-        (e.message.includes("Table") && e.message.includes("doesn't exist")))
+      e.code === "ER_LOCK_DEADLOCK" ||
+      e.errno === 1213 ||
+      e.code === "ER_LOCK_WAIT_TIMEOUT" ||
+      e.errno === 1205 ||
+      e.code === "ER_DUP_ENTRY" ||
+      e.errno === 1062
     ) {
       return true;
     }
@@ -202,10 +325,29 @@ function isMissingTableError(err: unknown): boolean {
 }
 
 /**
+ * Executes an operation with controlled exponential backoff retry for transient concurrency conflicts.
+ */
+async function executeWithConcurrencyRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      attempt++;
+      if (attempt >= maxRetries || !isRetryableConcurrencyError(err)) {
+        throw err;
+      }
+      const backoffMs = attempt * 20 + Math.floor(Math.random() * 25);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+}
+
+/**
  * Updates the in-memory cache and enforces LRU capacity bounding.
  */
 function updateMemoryCache(key: string, entry: RateLimitEntry): void {
-  // Move to end (most recently used)
+  // Move to end (most recently accessed)
   memoryCache.delete(key);
   memoryCache.set(key, entry);
 
@@ -279,19 +421,20 @@ export async function checkRateLimit(
     }
   } catch (err: unknown) {
     if (err instanceof ApiError) throw err;
-    if (isMissingTableError(err)) {
+    if (isGenuineMissingTableError(err)) {
       dbTableAvailable = false;
       if (!warnedMissingTable) {
         console.warn(
-          "[rate-limiter] auth_rate_limits table not found. Using in-memory rate limiting until migration 0012 is applied.",
+          "[rate-limiter] Table 'auth_rate_limits' not found (migration 0012 pending). Operating in memory-only fallback mode.",
         );
         warnedMissingTable = true;
       }
       return;
     }
-    // Non-fatal database connectivity error: degrade gracefully to in-memory check
+    // Transient database failure: log warning and proceed with in-memory check for this request.
+    // Do not disable dbTableAvailable permanently for transient errors!
     console.warn(
-      "[rate-limiter] Database check failed, falling back to in-memory store:",
+      "[rate-limiter] Database rate-limit check failed temporarily; proceeding with process-local check:",
       err instanceof Error ? err.message : err,
     );
   }
@@ -353,13 +496,15 @@ function recordFailedAttemptInMemory(
 /**
  * Records a failed attempt for a given key.
  *
- * Guarantees:
- * 1. Authoritative MySQL row-level locking (SELECT ... FOR UPDATE) inside transaction.
- * 2. Simultaneous failed attempts are counted accurately with zero lost updates.
- * 3. 15-minute fixed window starts at first failed attempt; resets when window elapses.
- * 4. When maxPoints is reached, sets blockedUntil for blockDurationMs.
- * 5. While locked out, subsequent attempts DO NOT extend the lockout, preventing permanent DoS.
- * 6. Graceful in-memory fallback if table is missing (P2021) or database is unreachable.
+ * Concurrency & Reliability Guarantees:
+ * 1. Race-Safe Key Creation: Inserts a baseline row via atomic ON DUPLICATE KEY UPDATE before locking,
+ *    preventing duplicate-key collision crashes when multiple workers process simultaneous first attempts.
+ * 2. Authoritative Row Locking: Uses SELECT ... FOR UPDATE within a transaction to serialize concurrent updates.
+ * 3. Deadlock & Race Retries: Automatically retries on lock deadlocks (1213) and duplicate entry races (1062).
+ * 4. 15-Minute Window: Fixed counting window begins at first_at; resets if window elapses.
+ * 5. Non-Extending Lockout: Repeated attempts during an active block do NOT extend blocked_until.
+ * 6. Resilient Fallback: Transient connection errors fall back to in-memory store for that request without
+ *    permanently disabling database persistence. Genuine missing table (P2021) operates in memory fallback.
  */
 export async function recordFailedAttempt(
   key: string,
@@ -367,95 +512,95 @@ export async function recordFailedAttempt(
   windowMs: number = DEFAULT_RATE_LIMIT_WINDOW_MS,
   blockDurationMs: number = DEFAULT_RATE_LIMIT_BLOCK_MS,
 ): Promise<{ blocked: boolean; retryAfterSeconds?: number; points: number }> {
-  // If database is available, execute authoritative atomic transaction with row lock
   if (dbTableAvailable && process.env["DATABASE_URL"]) {
     try {
       const prisma = db();
       if (prisma?.authRateLimit && typeof prisma.$transaction === "function") {
-        const result = await prisma.$transaction(async (tx) => {
-          // Row-level lock on key
-          const rows = await tx.$queryRaw<
-            Array<{
-              id: string;
-              key: string;
-              points: number;
-              first_at: Date;
-              last_at: Date;
-              blocked_until: Date | null;
-            }>
-          >`SELECT id, \`key\`, points, first_at, last_at, blocked_until FROM auth_rate_limits WHERE \`key\` = ${key} FOR UPDATE`;
+        const result = await executeWithConcurrencyRetry(async () => {
+          return await prisma.$transaction(async (tx) => {
+            const now = Date.now();
+            const nowDate = new Date(now);
+            const initialId = randomUUID();
 
-          const now = Date.now();
-          const nowDate = new Date(now);
+            // Step 1: Race-safe key initialization.
+            // Guarantees the row exists without throwing duplicate key errors if two workers race on a new key.
+            await tx.$executeRaw`
+              INSERT INTO auth_rate_limits (id, \`key\`, points, first_at, last_at, blocked_until)
+              VALUES (${initialId}, ${key}, 0, ${nowDate}, ${nowDate}, NULL)
+              ON DUPLICATE KEY UPDATE \`last_at\` = \`last_at\`
+            `;
 
-          if (rows.length === 0) {
-            // First failed attempt for this key
-            const isBlocked = 1 >= maxPoints;
+            // Step 2: Row is guaranteed to exist. Exclusively lock the row for atomic evaluation.
+            const rows = await tx.$queryRaw<
+              Array<{
+                id: string;
+                key: string;
+                points: number;
+                first_at: Date;
+                last_at: Date;
+                blocked_until: Date | null;
+              }>
+            >`SELECT id, \`key\`, points, first_at, last_at, blocked_until FROM auth_rate_limits WHERE \`key\` = ${key} FOR UPDATE`;
+
+            const row = rows[0]!;
+            const currentPoints = row.points;
+            const firstAtMs = new Date(row.first_at).getTime();
+            const blockedUntilMs = row.blocked_until ? new Date(row.blocked_until).getTime() : null;
+
+            // Case A: Key is currently actively blocked.
+            // DO NOT EXTEND LOCKOUT. Keep existing blocked_until to protect legitimate owner from perpetual DoS.
+            if (blockedUntilMs && blockedUntilMs > now) {
+              return {
+                points: currentPoints,
+                firstAt: firstAtMs,
+                lastAt: new Date(row.last_at).getTime(),
+                blockedUntil: blockedUntilMs,
+                blocked: true,
+                retryAfterSeconds: Math.ceil((blockedUntilMs - now) / 1000),
+              };
+            }
+
+            // Case B: Brand-new key (points === 0) or window has expired -> start fresh window
+            if (currentPoints === 0 || now - firstAtMs > windowMs) {
+              const isBlocked = 1 >= maxPoints;
+              const blockedUntil = isBlocked ? new Date(now + blockDurationMs) : null;
+
+              await tx.$executeRaw`
+                UPDATE auth_rate_limits
+                SET points = 1, first_at = ${nowDate}, last_at = ${nowDate}, blocked_until = ${blockedUntil}
+                WHERE \`key\` = ${key}
+              `;
+
+              return {
+                points: 1,
+                firstAt: now,
+                lastAt: now,
+                blockedUntil: blockedUntil ? blockedUntil.getTime() : null,
+                blocked: isBlocked,
+                retryAfterSeconds: isBlocked ? Math.ceil(blockDurationMs / 1000) : undefined,
+              };
+            }
+
+            // Case C: Active window -> atomic increment
+            const nextPoints = currentPoints + 1;
+            const isBlocked = nextPoints >= maxPoints;
             const blockedUntil = isBlocked ? new Date(now + blockDurationMs) : null;
-            const id = randomUUID();
 
-            await tx.$executeRaw`INSERT INTO auth_rate_limits (id, \`key\`, points, first_at, last_at, blocked_until) VALUES (${id}, ${key}, 1, ${nowDate}, ${nowDate}, ${blockedUntil})`;
+            await tx.$executeRaw`
+              UPDATE auth_rate_limits
+              SET points = ${nextPoints}, last_at = ${nowDate}, blocked_until = ${blockedUntil}
+              WHERE \`key\` = ${key}
+            `;
 
             return {
-              points: 1,
-              firstAt: now,
-              lastAt: now,
-              blockedUntil: blockedUntil ? blockedUntil.getTime() : null,
-              blocked: isBlocked,
-              retryAfterSeconds: isBlocked ? Math.ceil(blockDurationMs / 1000) : undefined,
-            };
-          }
-
-          const row = rows[0]!;
-          const currentPoints = row.points;
-          const firstAtMs = new Date(row.first_at).getTime();
-          const blockedUntilMs = row.blocked_until ? new Date(row.blocked_until).getTime() : null;
-
-          // Case A: Key is currently actively blocked.
-          // DO NOT EXTEND LOCKOUT. Keep existing blocked_until so legitimate owners cannot be kept out indefinitely.
-          if (blockedUntilMs && blockedUntilMs > now) {
-            return {
-              points: currentPoints,
+              points: nextPoints,
               firstAt: firstAtMs,
-              lastAt: new Date(row.last_at).getTime(),
-              blockedUntil: blockedUntilMs,
-              blocked: true,
-              retryAfterSeconds: Math.ceil((blockedUntilMs - now) / 1000),
-            };
-          }
-
-          // Case B: Window has expired (and key is not actively blocked) -> start fresh window
-          if (now - firstAtMs > windowMs) {
-            const isBlocked = 1 >= maxPoints;
-            const blockedUntil = isBlocked ? new Date(now + blockDurationMs) : null;
-
-            await tx.$executeRaw`UPDATE auth_rate_limits SET points = 1, first_at = ${nowDate}, last_at = ${nowDate}, blocked_until = ${blockedUntil} WHERE \`key\` = ${key}`;
-
-            return {
-              points: 1,
-              firstAt: now,
               lastAt: now,
               blockedUntil: blockedUntil ? blockedUntil.getTime() : null,
               blocked: isBlocked,
               retryAfterSeconds: isBlocked ? Math.ceil(blockDurationMs / 1000) : undefined,
             };
-          }
-
-          // Case C: Active window -> atomic increment
-          const nextPoints = currentPoints + 1;
-          const isBlocked = nextPoints >= maxPoints;
-          const blockedUntil = isBlocked ? new Date(now + blockDurationMs) : null;
-
-          await tx.$executeRaw`UPDATE auth_rate_limits SET points = ${nextPoints}, last_at = ${nowDate}, blocked_until = ${blockedUntil} WHERE \`key\` = ${key}`;
-
-          return {
-            points: nextPoints,
-            firstAt: firstAtMs,
-            lastAt: now,
-            blockedUntil: blockedUntil ? blockedUntil.getTime() : null,
-            blocked: isBlocked,
-            retryAfterSeconds: isBlocked ? Math.ceil(blockDurationMs / 1000) : undefined,
-          };
+          });
         });
 
         // Update in-memory cache with authoritative state
@@ -475,17 +620,17 @@ export async function recordFailedAttempt(
         };
       }
     } catch (err: unknown) {
-      if (isMissingTableError(err)) {
+      if (isGenuineMissingTableError(err)) {
         dbTableAvailable = false;
         if (!warnedMissingTable) {
           console.warn(
-            "[rate-limiter] auth_rate_limits table not found. Using in-memory rate limiting until migration 0012 is applied.",
+            "[rate-limiter] Table 'auth_rate_limits' not found (migration 0012 pending). Operating in memory-only fallback mode.",
           );
           warnedMissingTable = true;
         }
       } else {
         console.warn(
-          "[rate-limiter] Database transaction failed, falling back to in-memory store:",
+          "[rate-limiter] Database transaction failed, falling back to process-local store for this attempt:",
           err instanceof Error ? err.message : err,
         );
       }
@@ -516,7 +661,7 @@ export async function resetRateLimit(keys: string[]): Promise<void> {
         where: { key: { in: keys } },
       });
     } catch (err: unknown) {
-      if (isMissingTableError(err)) {
+      if (isGenuineMissingTableError(err)) {
         dbTableAvailable = false;
       }
     }

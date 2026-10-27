@@ -639,13 +639,15 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
         };
       });
 
-      await act(async () => {
-        await vault.current.changeMasterPassword(
-          "MasterPass123!",
-          "BrandNewMasterPass456!",
-          "AccountPass123!",
-        );
-      });
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("could not be verified");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -672,13 +674,15 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
         };
       });
 
-      await act(async () => {
-        await vault.current.changeMasterPassword(
-          "MasterPass123!",
-          "BrandNewMasterPass456!",
-          "AccountPass123!",
-        );
-      });
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("could not be verified");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -705,13 +709,15 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
         };
       });
 
-      await act(async () => {
-        await vault.current.changeMasterPassword(
-          "MasterPass123!",
-          "BrandNewMasterPass456!",
-          "AccountPass123!",
-        );
-      });
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("could not be verified");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -738,13 +744,15 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
         };
       });
 
-      await act(async () => {
-        await vault.current.changeMasterPassword(
-          "MasterPass123!",
-          "BrandNewMasterPass456!",
-          "AccountPass123!",
-        );
-      });
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("could not be verified");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });

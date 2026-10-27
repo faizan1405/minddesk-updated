@@ -37,6 +37,7 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showAccountPassword, setShowAccountPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,15 +63,19 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
     }
 
     setIsChangingPassword(true);
+    setErrorMsg(null);
     try {
       await changeMasterPassword(currentPassword, newPassword, accountPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
       setAccountPassword("");
+      setErrorMsg(null);
       onOpenChange(false);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to change master password.");
+      const msg = err instanceof Error ? err.message : "Failed to change master password.";
+      setErrorMsg(msg);
+      toast.error(msg);
     } finally {
       setIsChangingPassword(false);
     }
@@ -249,6 +254,15 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
                 </button>
               </div>
             </div>
+
+            {errorMsg && (
+              <div
+                role="alert"
+                className="p-2 rounded-md bg-destructive/10 text-destructive text-xs leading-relaxed border border-destructive/20"
+              >
+                {errorMsg}
+              </div>
+            )}
 
             <Button
               type="submit"

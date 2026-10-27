@@ -649,10 +649,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
           // If recovery could not verify exact metadata & cryptographic match:
           // NEVER report success! Do not alter local metadata or delete any entries/documents.
-          toast.error(
-            "Network connection was interrupted. Master password update could not be verified on the server. Please check your connection and reload.",
+          // REJECT with a clear error so the UI keeps the dialog open and displays recovery guidance!
+          const unconfirmedError = new Error(
+            "Network connection was interrupted and the server update could not be verified. Your master password has NOT been changed. Please check your connection and try again.",
           );
-          return;
+          toast.error(unconfirmedError.message);
+          throw unconfirmedError;
         }
 
         if (errorObj?.status === 409 || msg.includes("Conflict") || msg.includes("409")) {
