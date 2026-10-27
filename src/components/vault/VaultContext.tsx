@@ -595,21 +595,64 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         if (isAmbiguousNetworkError(err)) {
           try {
             const latestMeta = await fetchVaultMeta();
-            if (
+            // Strict metadata verification:
+            // 1. Vault is initialized
+            // 2. Exact version increment (expected_version + 1)
+            // 3. Exact wrapped_key matches candidate
+            // 4. Exact salt matches candidate
+            // 5. Exact wrapped_key_iv matches candidate
+            const isExactMetadataMatch =
               latestMeta.initialized &&
               latestMeta.version === vaultMeta.version + 1 &&
-              latestMeta.wrapped_key === rewrapped.wrappedKey
+              latestMeta.wrapped_key === rewrapped.wrappedKey &&
+              latestMeta.salt === rewrapped.saltHex &&
+              latestMeta.wrapped_key_iv === rewrapped.wrappedKeyIv;
+
+            if (
+              isExactMetadataMatch &&
+              latestMeta.salt &&
+              latestMeta.wrapped_key &&
+              latestMeta.wrapped_key_iv
             ) {
-              if (unlockGenerationRef.current !== gen) return;
-              setVaultMeta(latestMeta);
-              toast.success(
-                "Master password updated successfully (verified after network reconnection).",
+              // 6. Cryptographic confirmation: verify that server's committed metadata can be unlocked
+              // with newPassword to yield the exact active root key byte-for-byte!
+              const recoveredKey = await unlockVault(
+                newPassword,
+                latestMeta.salt,
+                latestMeta.wrapped_key,
+                latestMeta.wrapped_key_iv,
+                {
+                  iterations: latestMeta.iterations,
+                  memoryCost: latestMeta.memory_cost,
+                  parallelism: latestMeta.parallelism,
+                },
               );
-              return;
+
+              const currentRootKey = rootKeyRef.current;
+              const keysMatch =
+                currentRootKey &&
+                recoveredKey.length === currentRootKey.length &&
+                recoveredKey.every((b, i) => b === currentRootKey[i]);
+
+              if (keysMatch) {
+                if (unlockGenerationRef.current !== gen) return;
+                setVaultMeta(latestMeta);
+                toast.success(
+                  "Master password updated successfully (verified after network reconnection).",
+                );
+                return;
+              }
             }
           } catch {
-            // Best effort recovery check
+            // Verification failed or could not be confirmed
           }
+
+          // If recovery could not verify exact metadata & cryptographic match:
+          // NEVER report success! Do not alter local metadata or delete any entries/documents.
+          toast.error(
+            "Network connection was interrupted. Master password update could not be verified on the server. Please check your connection and reload.",
+          );
+          return;
         }
 
         if (errorObj?.status === 409 || msg.includes("Conflict") || msg.includes("409")) {

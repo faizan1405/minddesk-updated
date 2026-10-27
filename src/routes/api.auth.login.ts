@@ -41,8 +41,10 @@ export const Route = createFileRoute("/api/auth/login")({
             throw new api.ApiError(401, "Incorrect email or password.");
           }
 
-          // 3. Successful login: reset failed counters for this IP and account
-          await resetRateLimit([ipKey, accountKey]);
+          // 3. Successful login: reset failed counters for this account ONLY.
+          // Never reset IP rate limit counter on login to prevent attackers with valid credentials
+          // from resetting IP rate limits while brute-forcing other accounts.
+          await resetRateLimit([accountKey]);
 
           const cookie = await api.createSession(user.id);
           return api.json({ user: api.userDto(user) }, { headers: { "set-cookie": cookie } });

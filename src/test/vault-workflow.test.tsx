@@ -582,6 +582,172 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
         }),
       ).rejects.toMatchObject({ status: 409 });
     });
+
+    it("ambiguous network recovery confirms exact version, wrapped key, salt, IV, and cryptographic key match", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 2,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(2);
+      expect(vault.current.vaultMeta?.wrapped_key).toBe(capturedPayload.wrapped_key);
+    });
+
+    it("ambiguous network recovery rejects and does not update when salt is mismatched", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: "different_salt_1234567890abcdef",
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 2,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects and does not update when IV is mismatched", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: "mismatched_iv_1234567890abcdef",
+          version: 2,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects when version has not incremented (delayed server commit)", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 1,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects when concurrent change happened (version jumped to 3)", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 3,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
   });
 
   // -------------------------------------------------------------------------

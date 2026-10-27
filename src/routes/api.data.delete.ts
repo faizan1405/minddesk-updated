@@ -28,7 +28,7 @@ export const Route = createFileRoute("/api/data/delete")({
             throw new api.ApiError(400, "Password is incorrect");
           }
 
-          await resetRateLimit([ipKey, userKey]);
+          await resetRateLimit([userKey]);
           await api.deleteUserData(user.id);
           return api.json({ ok: true });
         });

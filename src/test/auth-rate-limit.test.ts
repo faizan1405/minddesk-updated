@@ -18,12 +18,14 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
 
   beforeEach(() => {
     process.env["DATABASE_URL"] = "mysql://mock:mock@localhost:3306/mock";
+    process.env["TRUST_PROXY"] = "hostinger";
     _resetRateLimiterForTesting();
     vi.restoreAllMocks();
     (globalThis as any).__prisma = undefined;
   });
 
-  it("permits normal login with valid credentials", async () => {
+  it("permits normal login with valid credentials and resets only the account counter", async () => {
+    const deleteManyMock = vi.fn().mockResolvedValue({ count: 1 });
     const mockPrisma = {
       user: {
         count: vi.fn().mockResolvedValue(1),
@@ -34,8 +36,7 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
       },
       authRateLimit: {
         findMany: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn().mockResolvedValue({}),
-        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        deleteMany: deleteManyMock,
       },
     };
     (globalThis as any).__prisma = mockPrisma;
@@ -44,7 +45,7 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
     const handlers = (LoginRoute.options as any).server.handlers;
     const req = new Request("http://localhost/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.10" },
       body: JSON.stringify({ email: "owner@example.com", password: "CorrectPassword123!" }),
     });
 
@@ -55,6 +56,57 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
     expect(json.user).toBeDefined();
     expect(json.user.email).toBe("owner@example.com");
     expect(res.headers.get("set-cookie")).toContain("md_session=");
+
+    // Verify deleteMany was called for account key ONLY, NOT for the ip key!
+    expect(deleteManyMock).toHaveBeenCalledWith({
+      where: { key: { in: ["login:account:owner@example.com"] } },
+    });
+  });
+
+  it("throttles attacking IP after 10 failed attempts, preventing login even with valid account credentials", async () => {
+    const mockPrisma = {
+      user: {
+        count: vi.fn().mockResolvedValue(1),
+        findUnique: vi.fn((args: any) => {
+          if (args.where.email === "owner@example.com") return Promise.resolve(mockUser);
+          return Promise.resolve(null);
+        }),
+      },
+      session: {
+        create: vi.fn().mockResolvedValue({ id: "session-1" }),
+      },
+      authRateLimit: {
+        findMany: vi.fn().mockResolvedValue([]),
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    (globalThis as any).__prisma = mockPrisma;
+    const handlers = (LoginRoute.options as any).server.handlers;
+
+    const attackerIp = "198.51.100.99";
+
+    // 1. Attacker sends 10 failed attempts on other accounts from this IP (IP limit is 10)
+    vi.spyOn(apiServer, "verifyPassword").mockResolvedValue(false);
+    for (let i = 0; i < 10; i++) {
+      const req = new Request("http://localhost/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-real-ip": attackerIp },
+        body: JSON.stringify({ email: `victim${i}@example.com`, password: "BadPassword" }),
+      });
+      const res = await handlers.POST({ request: req });
+      expect(res.status).toBe(401);
+    }
+
+    // 2. The IP is now throttled. Any subsequent login attempt from this IP must be rejected with 429
+    // even if correct credentials for a valid account are supplied
+    vi.spyOn(apiServer, "verifyPassword").mockResolvedValue(true);
+    const validReq = new Request("http://localhost/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-real-ip": attackerIp },
+      body: JSON.stringify({ email: "owner@example.com", password: "CorrectPassword123!" }),
+    });
+    const validRes = await handlers.POST({ request: validReq });
+    expect(validRes.status).toBe(429);
   });
 
   it("rejects invalid password with 401 Unauthorized", async () => {
@@ -65,7 +117,6 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
       },
       authRateLimit: {
         findMany: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn().mockResolvedValue({}),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };
@@ -75,7 +126,7 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
     const handlers = (LoginRoute.options as any).server.handlers;
     const req = new Request("http://localhost/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.11" },
       body: JSON.stringify({ email: "owner@example.com", password: "WrongPassword!" }),
     });
 
@@ -94,7 +145,6 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
       },
       authRateLimit: {
         findMany: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn().mockResolvedValue({}),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };
@@ -104,7 +154,7 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
     const handlers = (LoginRoute.options as any).server.handlers;
     const req = new Request("http://localhost/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-real-ip": "198.51.100.12" },
       body: JSON.stringify({ email: "unknown-account@example.com", password: "AnyPassword123!" }),
     });
 
@@ -123,7 +173,6 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
       },
       authRateLimit: {
         findMany: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn().mockResolvedValue({}),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };
@@ -171,7 +220,6 @@ describe("Login Brute-Force & Rate Limiting (POST /api/auth/login)", () => {
       },
       authRateLimit: {
         findMany: vi.fn().mockResolvedValue([]),
-        upsert: vi.fn().mockResolvedValue({}),
         deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
     };

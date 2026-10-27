@@ -40,8 +40,8 @@ export const Route = createFileRoute("/api/vault/password")({
             throw new api.ApiError(401, "Incorrect account password.");
           }
 
-          // Reset rate limits on successful account authentication
-          await resetRateLimit([ipKey, userKey]);
+          // Reset rate limits on successful account authentication for user only (preserves IP throttling)
+          await resetRateLimit([userKey]);
 
           // P1: Atomic version-checked optimistic concurrency update
           const result = await api.db().vaultMeta.updateMany({

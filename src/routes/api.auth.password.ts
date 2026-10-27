@@ -26,7 +26,7 @@ export const Route = createFileRoute("/api/auth/password")({
             throw new api.ApiError(400, "Current password is incorrect");
           }
 
-          await resetRateLimit([ipKey, userKey]);
+          await resetRateLimit([userKey]);
 
           const prisma = api.db();
           const keep = await api.currentSessionId(request);
