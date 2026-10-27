@@ -359,7 +359,7 @@ export function DataSection() {
       <Card title="Import a backup">
         <p className="text-sm text-muted-foreground">Restoring from a backup isn't available yet. Keep your exported files safe — they'll work with import once it's added.</p>
       </Card>
-      <Card tone="danger" title="Delete workspace data" description="Permanently deletes all your tasks, lists, notes (and uploaded note images), projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords & documents) remain safe.">
+      <Card tone="danger" title="Delete workspace data" description="Permanently deletes all your tasks, lists, notes, projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords & documents) remain safe.">
         <Button variant="destructive" className="h-11 rounded-xl" disabled={!!user?.preview} onClick={() => setDelOpen(true)}>Delete workspace data…</Button>
         {user?.preview && <PreviewNote>Not available in Preview Mode.</PreviewNote>}
       </Card>
@@ -383,7 +383,7 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
       <AlertDialogContent className="rounded-2xl">
         <AlertDialogHeader>
           <AlertDialogTitle>Delete workspace data?</AlertDialogTitle>
-          <AlertDialogDescription>This permanently deletes all your workspace notes, tasks, projects, plans, mind maps, habits, and uploaded images. Your account, sign-in, preferences, and My Private Vault (passwords and documents) remain safe. This cannot be undone. Export a backup first if you might need it.</AlertDialogDescription>
+          <AlertDialogDescription>This permanently deletes all your workspace notes, tasks, projects, plans, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords and documents) remain safe. This cannot be undone. Export a backup first if you might need it.</AlertDialogDescription>
         </AlertDialogHeader>
         <form id="del-form" className="space-y-3" onSubmit={(e) => { e.preventDefault(); del.mutate(); }}>
           <Input type="password" autoComplete="current-password" placeholder="Your password" value={password}

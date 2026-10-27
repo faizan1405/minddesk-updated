@@ -235,195 +235,28 @@ export function extractImageIdsFromContent(content: unknown): string[] {
   return Array.from(imageIds);
 }
 
-/**
- * Safely unlinks an array of image storage files from disk, ignoring missing files (ENOENT).
- */
-export async function unlinkImageFiles(storageKeys: string[]): Promise<number> {
-  const storageDir = getStorageDir();
-  let unlinked = 0;
-  for (const key of storageKeys) {
-    if (!key) continue;
-    try {
-      const filePath = getSafeImagePath(storageDir, key);
-      await unlink(filePath);
-      unlinked++;
-    } catch (err: unknown) {
-      if ((err as { code?: string })?.code !== "ENOENT") {
-        console.warn(`[images] Non-critical warning unlinking image ${key}:`, err);
-      }
-    }
-  }
-  return unlinked;
-}
-
-export interface CleanupPagesImageResult {
-  candidateImageIds: string[];
-  preservedImageIds: string[];
-  deletedImageIds: string[];
-  unlinkedKeys: string[];
-}
-
-/**
- * Cleans up note images referenced by pages being permanently deleted,
- * BUT ONLY if no surviving note or project page (active or trashed) still references the image.
- */
-export async function cleanupNoteImagesForPages(
-  userId: string,
-  targetPages: Array<{ id: string; content: string }>,
-  txClient?: Prisma.TransactionClient | PrismaClient,
-): Promise<CleanupPagesImageResult> {
-  if (!targetPages || targetPages.length === 0) {
-    return { candidateImageIds: [], preservedImageIds: [], deletedImageIds: [], unlinkedKeys: [] };
-  }
-
-  // 1. Extract all image IDs across the target pages
-  const candidateSet = new Set<string>();
-  for (const page of targetPages) {
-    const ids = extractImageIdsFromContent(page.content);
-    for (const id of ids) candidateSet.add(id);
-  }
-
-  const candidateImageIds = Array.from(candidateSet);
-  if (candidateImageIds.length === 0) {
-    return { candidateImageIds: [], preservedImageIds: [], deletedImageIds: [], unlinkedKeys: [] };
-  }
-
-  const prisma = txClient || db();
-  const targetPageIds = targetPages.map((p) => p.id);
-
-  // 2. Query surviving pages for this user that contain any candidate ID
-  const orFilters = candidateImageIds.map((id) => ({
-    content: { contains: id },
-  }));
-
-  const survivingPages = await prisma.page.findMany({
-    where: {
-      userId,
-      id: { notIn: targetPageIds },
-      OR: orFilters,
-    },
-    select: { id: true, content: true },
-  });
-
-  const preservedSet = new Set<string>();
-  for (const sp of survivingPages) {
-    const idsInSurviving = extractImageIdsFromContent(sp.content);
-    for (const id of idsInSurviving) {
-      if (candidateSet.has(id)) {
-        preservedSet.add(id);
-      }
-    }
-  }
-
-  const preservedImageIds = Array.from(preservedSet);
-  const imagesToDelete = candidateImageIds.filter((id) => !preservedSet.has(id));
-
-  if (imagesToDelete.length === 0) {
-    return {
-      candidateImageIds,
-      preservedImageIds,
-      deletedImageIds: [],
-      unlinkedKeys: [],
-    };
-  }
-
-  // 3. Find database records for images to delete (ensuring user ownership)
-  const records = await prisma.noteImage.findMany({
-    where: {
-      userId,
-      id: { in: imagesToDelete },
-    },
-    select: { id: true, storageKey: true },
-  });
-
-  if (records.length === 0) {
-    return {
-      candidateImageIds,
-      preservedImageIds,
-      deletedImageIds: [],
-      unlinkedKeys: [],
-    };
-  }
-
-  // 4. Delete the NoteImage records in the database
-  const recordIds = records.map((r) => r.id);
-  const storageKeys = records.map((r) => r.storageKey);
-
-  await prisma.noteImage.deleteMany({
-    where: {
-      userId,
-      id: { in: recordIds },
-    },
-  });
-
-  // 5. Unlink the physical files on disk
-  await unlinkImageFiles(storageKeys);
-
-  return {
-    candidateImageIds,
-    preservedImageIds,
-    deletedImageIds: recordIds,
-    unlinkedKeys: storageKeys,
-  };
-}
-
-/**
- * Removes all NoteImage records and physical files for a user (used during complete workspace wipe).
- */
-export async function cleanupAllUserImages(
-  userId: string,
-  txClient?: Prisma.TransactionClient | PrismaClient,
-): Promise<{ deletedCount: number }> {
-  const prisma = txClient || db();
-
-  const records = await prisma.noteImage.findMany({
-    where: { userId },
-    select: { id: true, storageKey: true },
-  });
-
-  if (records.length === 0) {
-    return { deletedCount: 0 };
-  }
-
-  await prisma.noteImage.deleteMany({
-    where: { userId },
-  });
-
-  await unlinkImageFiles(records.map((r) => r.storageKey));
-
-  return { deletedCount: records.length };
-}
-
-export interface ReconcileImageOptions {
+export interface ScanOrphanedImagesOptions {
   olderThanMs?: number;
-  dryRun?: boolean;
   userId?: string;
 }
 
-export interface ReconcileImageResult {
+export interface ScanOrphanedImagesResult {
   scannedFiles: number;
-  unlinkedFiles: number;
+  unreferencedDiskFiles: Array<{ fileName: string; ageHours: string }>;
   scannedDbRecords: number;
-  deletedDbRecords: number;
-  dryRun: boolean;
+  unreferencedDbRecords: Array<{ id: string; storageKey: string; ageHours: string }>;
 }
 
 /**
- * Safely reconciles orphaned note image files on disk and orphaned database records.
- * 1. Removes files on disk that have no matching DB record (older than olderThanMs).
- * 2. Removes DB records that are not referenced by any surviving page (older than olderThanMs).
+ * Strictly READ-ONLY audit scanner for note images.
+ * Identifies unreferenced disk files and unreferenced DB records for audit purposes.
+ * NEVER deletes or unlinks any data.
  */
-export async function reconcileOrphanedNoteImages(
-  options?: ReconcileImageOptions | number,
-): Promise<ReconcileImageResult> {
+export async function scanOrphanedNoteImages(
+  options?: ScanOrphanedImagesOptions | number,
+): Promise<ScanOrphanedImagesResult> {
   const olderThanMs =
     typeof options === "number" ? options : (options?.olderThanMs ?? 2 * 60 * 60 * 1000);
-  const dryRun =
-    typeof options === "object" && options.dryRun !== undefined
-      ? options.dryRun
-      : typeof options === "number"
-        ? false
-        : false;
   const targetUserId = typeof options === "object" ? options.userId : undefined;
 
   const { readdir, stat } = await import("node:fs/promises");
@@ -433,15 +266,12 @@ export async function reconcileOrphanedNoteImages(
   const cutoffDate = new Date(now - olderThanMs);
 
   let scannedFiles = 0;
-  let unlinkedFiles = 0;
-  let scannedDbRecords = 0;
-  let deletedDbRecords = 0;
+  const unreferencedDiskFiles: Array<{ fileName: string; ageHours: string }> = [];
 
-  // Phase 1: Reconcile disk files without DB records
+  // Phase 1: Audit disk files
   if (existsSync(storageDir)) {
     const files = await readdir(storageDir);
     for (const fileName of files) {
-      // MindDesk note images have format: <uuid>.<ext>
       const match = fileName.match(
         /^([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(png|jpe?g|webp)$/i,
       );
@@ -453,27 +283,25 @@ export async function reconcileOrphanedNoteImages(
       try {
         const fileStat = await stat(filePath);
         const ageMs = now - fileStat.mtimeMs;
-        if (ageMs < olderThanMs) {
-          continue; // In grace period
-        }
+        if (ageMs < olderThanMs) continue; // In grace period
 
         const record = await prisma.noteImage.findUnique({
           where: { id: imageId },
         });
 
         if (!record) {
-          if (!dryRun) {
-            await unlink(filePath);
-          }
-          unlinkedFiles++;
+          unreferencedDiskFiles.push({
+            fileName,
+            ageHours: (ageMs / 3600000).toFixed(1),
+          });
         }
       } catch {
-        // Best-effort
+        // Read-only inspection; ignore read failures
       }
     }
   }
 
-  // Phase 2: Reconcile DB records not referenced by any page (active or trashed)
+  // Phase 2: Audit database records
   const whereClause: Prisma.NoteImageWhereInput = {
     createdAt: { lte: cutoffDate },
   };
@@ -483,10 +311,10 @@ export async function reconcileOrphanedNoteImages(
 
   const dbRecords = await prisma.noteImage.findMany({
     where: whereClause,
-    select: { id: true, userId: true, storageKey: true },
+    select: { id: true, userId: true, storageKey: true, createdAt: true },
   });
 
-  scannedDbRecords = dbRecords.length;
+  const unreferencedDbRecords: Array<{ id: string; storageKey: string; ageHours: string }> = [];
 
   for (const record of dbRecords) {
     try {
@@ -499,30 +327,22 @@ export async function reconcileOrphanedNoteImages(
       });
 
       if (!referencingPage) {
-        // Orphaned NoteImage record
-        if (!dryRun) {
-          await prisma.noteImage.delete({
-            where: { id: record.id },
-          });
-          const filePath = getSafeImagePath(storageDir, record.storageKey);
-          try {
-            await unlink(filePath);
-          } catch {
-            // Ignore if missing
-          }
-        }
-        deletedDbRecords++;
+        const ageMs = now - new Date(record.createdAt).getTime();
+        unreferencedDbRecords.push({
+          id: record.id,
+          storageKey: record.storageKey,
+          ageHours: (ageMs / 3600000).toFixed(1),
+        });
       }
-    } catch (err) {
-      console.warn(`[images] Error checking reference for NoteImage ${record.id}:`, err);
+    } catch {
+      // Read-only inspection
     }
   }
 
   return {
     scannedFiles,
-    unlinkedFiles,
-    scannedDbRecords,
-    deletedDbRecords,
-    dryRun,
+    unreferencedDiskFiles,
+    scannedDbRecords: dbRecords.length,
+    unreferencedDbRecords,
   };
 }

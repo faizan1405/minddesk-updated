@@ -633,26 +633,18 @@ export async function exportUserData(user: {
 }
 
 /**
- * Removes all workspace content for one user in a single transaction.
+ * Removes workspace content for one user in a single transaction.
  * Scope:
  * - Deletes tasks, task lists, projects, pages (notes), calendar events,
  *   plan categories, plan activities, focus sessions, mind maps, routines, habits,
- *   habit completions, and note images (both database rows and physical files).
+ *   and habit completions.
  * - Intentionally preserved: User account, login sessions, preferences, and
  *   My Private Vault (vault_meta, vault_entries, vault_documents, vault_document_attachments,
- *   and encrypted document attachment files in storage/vault-documents remain strictly untouched).
+ *   and encrypted document files in storage/vault-documents remain strictly untouched).
  */
 export async function deleteUserData(userId: string) {
   const p = db();
   const where = { userId };
-
-  // 1. Fetch user NoteImage records before transaction so physical files can be unlinked post-commit
-  const userImages = await p.noteImage.findMany({
-    where,
-    select: { storageKey: true },
-  });
-
-  // 2. Perform atomic deletion of all workspace database rows
   await p.$transaction([
     p.habitCompletion.deleteMany({ where }),
     p.habit.deleteMany({ where }),
@@ -668,12 +660,5 @@ export async function deleteUserData(userId: string) {
     p.task.updateMany({ where, data: { parentId: null } }),
     p.task.deleteMany({ where }),
     p.taskList.deleteMany({ where }),
-    p.noteImage.deleteMany({ where }),
   ]);
-
-  // 3. Unlink physical note image files from disk after transaction commits successfully
-  if (userImages.length > 0) {
-    const { unlinkImageFiles } = await import("./images.server");
-    await unlinkImageFiles(userImages.map((img) => img.storageKey));
-  }
 }

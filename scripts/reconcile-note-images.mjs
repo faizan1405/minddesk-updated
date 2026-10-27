@@ -1,16 +1,16 @@
-// MindDesk Note Images — Operational Storage & Database Reconciliation Script
-// Safe, controlled maintenance utility to report and clean unreferenced note image files and records.
+// MindDesk Note Images — Strictly Read-Only Audit & Inventory Script
+// Reports unreferenced storage files and database records for audit and diagnosis.
+// GUARANTEE: Never deletes, unlinks, purges, or mutates any data or files.
 //
 // Usage:
-//   node scripts/reconcile-note-images.mjs              # Defaults to --dry-run (safe report only)
-//   node scripts/reconcile-note-images.mjs --dry-run    # Explicit dry-run
-//   node scripts/reconcile-note-images.mjs --execute    # Performs safe cleanup
-//   node scripts/reconcile-note-images.mjs --execute --age-hours 4 # Custom grace period
+//   node scripts/reconcile-note-images.mjs
+//   node scripts/reconcile-note-images.mjs --age-hours 4
+//   node scripts/reconcile-note-images.mjs --user-id <uuid>
 
 import { PrismaClient } from "@prisma/client";
-import { readdir, stat, unlink } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { join, resolve } from "node:path";
 
 const prisma = new PrismaClient();
 
@@ -24,20 +24,14 @@ function getStorageDirectory() {
   return resolve(process.cwd(), "storage/uploads");
 }
 
-function getSafeImagePath(storageDir, storageKey) {
-  if (!storageKey || typeof storageKey !== "string") return null;
-  if (/[\0/\\]/.test(storageKey) || storageKey.includes("..")) return null;
-  const resolvedDir = resolve(storageDir);
-  const resolvedPath = resolve(resolvedDir, storageKey);
-  const prefix = resolvedDir.endsWith(sep) ? resolvedDir : resolvedDir + sep;
-  if (!resolvedPath.startsWith(prefix)) return null;
-  return resolvedPath;
-}
-
 async function main() {
   const args = process.argv.slice(2);
-  const isExecute = args.includes("--execute") || args.includes("--force");
-  const isDryRun = !isExecute || args.includes("--dry-run");
+
+  if (args.includes("--execute") || args.includes("--force")) {
+    console.warn(
+      "\n[NOTICE] Automatic deletion is disabled by policy. This script operates exclusively in read-only audit mode.\n",
+    );
+  }
 
   const ageArgIdx = args.indexOf("--age-hours");
   const ageHours = ageArgIdx !== -1 && args[ageArgIdx + 1] ? parseFloat(args[ageArgIdx + 1]) : 2;
@@ -49,11 +43,9 @@ async function main() {
   const storageDir = getStorageDirectory();
 
   console.log("==========================================================");
-  console.log("MindDesk Note Image Reconciliation");
+  console.log("MindDesk Note Image Audit & Inventory (READ-ONLY)");
   console.log("==========================================================");
-  console.log(
-    `Mode:            ${isDryRun ? "DRY-RUN (Safe Report Only - No files deleted)" : "EXECUTE (Live Cleanup)"}`,
-  );
+  console.log(`Mode:            STRICTLY READ-ONLY (Zero Deletion / Zero Data Loss)`);
   console.log(`Storage Dir:     ${storageDir}`);
   console.log(`Grace Period:    ${ageHours} hours (${gracePeriodMs} ms)`);
   if (targetUserId) console.log(`Target User ID:  ${targetUserId}`);
@@ -62,12 +54,11 @@ async function main() {
   const now = Date.now();
   const cutoffDate = new Date(now - gracePeriodMs);
 
-  // Phase 1: Reconcile disk files missing from DB
+  // Phase 1: Audit disk files
   let totalDiskFiles = 0;
   let activeDiskFiles = 0;
   let inGraceDiskFiles = 0;
-  let orphanedDiskFiles = [];
-  let cleanedDiskFiles = 0;
+  const orphanedDiskFiles = [];
 
   if (existsSync(storageDir)) {
     const files = await readdir(storageDir);
@@ -93,19 +84,15 @@ async function main() {
         } else if (ageMs < gracePeriodMs) {
           inGraceDiskFiles++;
         } else {
-          orphanedDiskFiles.push({ fileName, filePath, ageHours: (ageMs / 3600000).toFixed(1) });
-          if (!isDryRun) {
-            await unlink(filePath);
-            cleanedDiskFiles++;
-          }
+          orphanedDiskFiles.push({ fileName, ageHours: (ageMs / 3600000).toFixed(1) });
         }
       } catch (err) {
-        console.error(`[reconcile] Error inspecting file ${fileName}:`, err);
+        console.error(`[audit] Error inspecting file ${fileName}:`, err);
       }
     }
   }
 
-  // Phase 2: Reconcile DB NoteImage records not referenced by any surviving page
+  // Phase 2: Audit database records
   const whereClause = {
     createdAt: { lte: cutoffDate },
   };
@@ -118,8 +105,7 @@ async function main() {
 
   let totalDbRecords = dbRecords.length;
   let activeDbRecords = 0;
-  let orphanedDbRecords = [];
-  let cleanedDbRecords = 0;
+  const orphanedDbRecords = [];
 
   for (const record of dbRecords) {
     try {
@@ -140,51 +126,31 @@ async function main() {
           storageKey: record.storageKey,
           ageHours: (ageMs / 3600000).toFixed(1),
         });
-        if (!isDryRun) {
-          await prisma.noteImage.delete({ where: { id: record.id } });
-          const safePath = getSafeImagePath(storageDir, record.storageKey);
-          if (safePath) {
-            try {
-              await unlink(safePath);
-            } catch (e) {
-              if (e?.code !== "ENOENT")
-                console.warn(`[reconcile] Error unlinking ${record.storageKey}:`, e);
-            }
-          }
-          cleanedDbRecords++;
-        }
       }
     } catch (err) {
-      console.error(`[reconcile] Error checking DB record ${record.id}:`, err);
+      console.error(`[audit] Error checking DB record ${record.id}:`, err);
     }
   }
 
-  console.log("\nDISK RECONCILIATION SUMMARY:");
-  console.log(`Total image files on disk:      ${totalDiskFiles}`);
-  console.log(`Active (matched in DB):         ${activeDiskFiles}`);
-  console.log(`In-flight (within grace period): ${inGraceDiskFiles}`);
-  console.log(`Orphaned disk candidates:       ${orphanedDiskFiles.length}`);
-  if (!isDryRun) console.log(`Unlinked disk files:            ${cleanedDiskFiles}`);
+  console.log("\nDISK AUDIT SUMMARY:");
+  console.log(`Total image files on disk:       ${totalDiskFiles}`);
+  console.log(`Active (matched in DB):          ${activeDiskFiles}`);
+  console.log(`In-flight (within grace period):  ${inGraceDiskFiles}`);
+  console.log(`Unmatched disk files (>grace):   ${orphanedDiskFiles.length}`);
 
-  console.log("\nDATABASE RECONCILIATION SUMMARY:");
-  console.log(`Total NoteImage records (>age): ${totalDbRecords}`);
-  console.log(`Active (referenced by a note):  ${activeDbRecords}`);
-  console.log(`Orphaned DB candidates:         ${orphanedDbRecords.length}`);
-  if (!isDryRun) console.log(`Deleted DB records:             ${cleanedDbRecords}`);
+  console.log("\nDATABASE AUDIT SUMMARY:");
+  console.log(`Total NoteImage records (>age):  ${totalDbRecords}`);
+  console.log(`Active (referenced by notes):    ${activeDbRecords}`);
+  console.log(`Unreferenced DB records (>age):  ${orphanedDbRecords.length}`);
 
   console.log("\n==========================================================");
-  if (isDryRun) {
-    console.log("DRY-RUN COMPLETE. No changes were made to storage or DB.");
-    console.log("Run with --execute to perform actual cleanup.");
-  } else {
-    console.log("EXECUTE COMPLETE. Cleaned up orphaned files and records.");
-  }
+  console.log("AUDIT COMPLETE. No files or database records were modified or deleted.");
   console.log("==========================================================");
 }
 
 main()
   .catch((e) => {
-    console.error("[reconcile-note-images] Fatal error:", e);
+    console.error("[audit-note-images] Fatal error:", e);
     process.exit(1);
   })
   .finally(async () => {

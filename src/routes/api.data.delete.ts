@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/api/data/delete")({
   server: {
     handlers: {
-      // Deletes all workspace content of the signed-in user (notes, tasks, projects, plans, mind maps, habits, and uploaded images).
+      // Deletes workspace content of the signed-in user (notes, tasks, projects, plans, mind maps, habits).
       // Account, sessions, preferences, and My Private Vault (passwords & documents) remain safe and preserved.
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
