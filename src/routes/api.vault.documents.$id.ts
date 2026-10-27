@@ -58,6 +58,19 @@ export const Route = createFileRoute("/api/vault/documents/$id")({
           const user = await api.requireUser(request);
           const body = UpdateInput.parse(await api.readJson(request));
 
+          // Reject explicit obsolete-attachment removal requests before updating encrypted metadata
+          if (body.obsolete_attachment_ids && body.obsolete_attachment_ids.length > 0) {
+            const { isDataPreservationMode } = await import("@/lib/server/preservation.server");
+            if (isDataPreservationMode()) {
+              throw new api.ApiError(
+                423,
+                "Data Preservation Mode is active: Removing existing attachments from documents is disabled. Your files remain protected.",
+                undefined,
+                { code: "DATA_PRESERVATION_ACTIVE", operation: "vault_attachment_deletion" },
+              );
+            }
+          }
+
           // 1. Atomic compare-and-swap update of encrypted document metadata
           // Guarantees obsolete attachments are NEVER deleted if the metadata commit fails
           const result = await api.db().vaultDocument.updateMany({

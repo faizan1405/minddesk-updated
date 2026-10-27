@@ -7,6 +7,7 @@ export type PreservationBlockedOperation =
   | "single_permanent_delete"
   | "vault_entry_deletion"
   | "vault_document_deletion"
+  | "vault_attachment_deletion"
   | "plan_activity_deletion"
   | "plan_category_deletion";
 
@@ -21,7 +22,9 @@ export type PreservationBlockedOperation =
  * - Emptying the Recycle Bin is blocked.
  * - Deleting all workspace data is blocked.
  * - Single-item permanent Recycle Bin deletion is blocked by default.
- * - Deleting Vault password entries and documents is blocked.
+ * - Deleting Vault password entries, documents, and attachments is blocked.
+ * - Removing existing attachments from document manifests is rejected.
+ * - Vault storage reconciliation is strictly non-destructive.
  * - Deleting Plan Your Day activities and categories is blocked.
  * - Obsolete Vault document attachment files are preserved on disk without unlinking.
  * - Ordinary note/task editing, soft-deletion, and Recycle Bin restore remain 100% operational.
@@ -113,6 +116,14 @@ export function assertBulkDeletionAllowed(operation: PreservationBlockedOperatio
       throw new ApiError(
         423,
         "Data Preservation Mode is active: Deleting Vault documents and attachments is disabled. Your encrypted files remain protected.",
+        undefined,
+        { code: "DATA_PRESERVATION_ACTIVE", operation },
+      );
+
+    case "vault_attachment_deletion":
+      throw new ApiError(
+        423,
+        "Data Preservation Mode is active: Deleting Vault attachments is disabled. Your encrypted files remain protected.",
         undefined,
         { code: "DATA_PRESERVATION_ACTIVE", operation },
       );

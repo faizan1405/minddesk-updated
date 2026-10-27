@@ -24,6 +24,7 @@ import { Route as DataSummaryRoute } from "@/routes/api.data.summary";
 import { Route as AuthMeRoute } from "@/routes/api.auth.me";
 import { Route as VaultEntryRoute } from "@/routes/api.vault.entries.$id";
 import { Route as VaultDocRoute } from "@/routes/api.vault.documents.$id";
+import { Route as VaultAttachmentRoute } from "@/routes/api.vault.documents.attachments.$id";
 import { Route as PlanActivityRoute } from "@/routes/api.plan.activities.$id";
 import { Route as PlanCategoryRoute } from "@/routes/api.plan.categories.$id";
 
@@ -334,28 +335,73 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(vaultStorage.deleteEncryptedAttachmentFile).not.toHaveBeenCalled();
     });
 
-    it("preserves obsolete attachment files on disk during PATCH /api/vault/documents/$id", async () => {
+        it("blocks DELETE /api/vault/documents/attachments/$id with HTTP 423 Locked", async () => {
       const mockPrisma = {
-        vaultDocument: {
-          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
-          findUniqueOrThrow: vi.fn().mockResolvedValue({
-            id: "doc-1",
-            encryptedData: "new_encrypted_manifest",
-            iv: "mock_iv_12345678",
-            version: 2,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            attachments: [],
-          }),
-        },
         vaultDocumentAttachment: {
-          findFirst: vi.fn().mockResolvedValue({ id: "att-obsolete-1", storageKey: "file.bin" }),
+          findFirst: vi.fn(),
+          delete: vi.fn(),
         },
       };
       (globalThis as any).__prisma = mockPrisma;
       vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
       vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
-      const deleteFileSpy = vi.spyOn(vaultStorage, "deleteEncryptedAttachmentFile");
+
+      const handlers = (VaultAttachmentRoute.options as any).server.handlers;
+      const validUuid = "11111111-2222-4333-8444-555555555555";
+      const req = new Request(
+        `http://localhost/api/vault/documents/attachments/${validUuid}`,
+        { method: "DELETE" },
+      );
+
+      const res = await handlers.DELETE({ request: req, params: { id: validUuid } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Deleting Vault attachments is disabled/i);
+      expect(mockPrisma.vaultDocumentAttachment.delete).not.toHaveBeenCalled();
+    });
+
+    it("protects deleteEncryptedAttachmentFile() by throwing 423 Locked under default settings", async () => {
+      const validUuid = "11111111-2222-4333-8444-555555555555";
+      await expect(
+        vaultStorage.deleteEncryptedAttachmentFile(mockUser.id, validUuid),
+      ).rejects.toThrowError(/Deleting Vault attachments is disabled/i);
+    });
+
+    it("makes reconcileAbandonedVaultStorage() strictly non-destructive even if dryRun: false is requested", async () => {
+      const result = await vaultStorage.reconcileAbandonedVaultStorage({ dryRun: false });
+      expect(result.dryRun).toBe(true);
+      expect(result.cleanedFiles).toBe(0);
+    });
+
+    it("ensures scripts/reconcile-vault-storage.mjs runs safely in dry-run mode when --execute is supplied", async () => {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+
+      const { stdout } = await execFileAsync(
+        "node",
+        ["scripts/reconcile-vault-storage.mjs", "--execute"],
+        {
+          cwd: process.cwd(),
+          env: { ...process.env, DATA_PRESERVATION_MODE: undefined },
+        },
+      );
+
+      expect(stdout).toMatch(/DRY-RUN/i);
+      expect(stdout).toMatch(/Data Preservation Mode is ACTIVE/i);
+      expect(stdout).not.toMatch(/\[DELETED\]/i);
+    });
+
+    it("rejects obsolete attachment removal in PATCH /api/vault/documents/$id with HTTP 423 before updating metadata", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          updateMany: vi.fn(),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
 
       const handlers = (VaultDocRoute.options as any).server.handlers;
       const req = new Request("http://localhost/api/vault/documents/doc-1", {
@@ -370,10 +416,50 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       });
 
       const res = await handlers.PATCH({ request: req, params: { id: "doc-1" } });
+      expect(res.status).toBe(423);
+
+      const json = await res.json();
+      expect(json.error).toMatch(/Removing existing attachments from documents is disabled/i);
+      // GUARANTEE: Encrypted metadata was NOT updated
+      expect(mockPrisma.vaultDocument.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("allows normal document editing without obsolete attachments in PATCH /api/vault/documents/$id", async () => {
+      const mockPrisma = {
+        vaultDocument: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          findUniqueOrThrow: vi.fn().mockResolvedValue({
+            id: "doc-1",
+            encryptedData: "updated_ciphertext",
+            iv: "mock_iv_12345678",
+            version: 2,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            attachments: [],
+          }),
+        },
+      };
+      (globalThis as any).__prisma = mockPrisma;
+      vi.spyOn(apiServer, "db").mockReturnValue(mockPrisma as any);
+      vi.spyOn(apiServer, "requireUser").mockResolvedValue(mockUser as any);
+
+      const handlers = (VaultDocRoute.options as any).server.handlers;
+      const req = new Request("http://localhost/api/vault/documents/doc-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encrypted_data: "updated_ciphertext",
+          iv: "mock_iv_12345678",
+          expected_version: 1,
+        }),
+      });
+
+      const res = await handlers.PATCH({ request: req, params: { id: "doc-1" } });
       expect(res.status).toBe(200);
 
-      // GUARANTEE: In Data Preservation Mode, obsolete attachment was NOT unlinked from storage
-      expect(deleteFileSpy).not.toHaveBeenCalled();
+      const json = await res.json();
+      expect(json.version).toBe(2);
+      expect(mockPrisma.vaultDocument.updateMany).toHaveBeenCalled();
     });
 
     it("blocks DELETE /api/plan/activities/$id with HTTP 423 Locked", async () => {
@@ -584,6 +670,7 @@ describe("MindDesk — Data Preservation Mode Safety Gate", () => {
       expect(() => assertBulkDeletionAllowed("single_permanent_delete")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("vault_entry_deletion")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("vault_document_deletion")).not.toThrow();
+      expect(() => assertBulkDeletionAllowed("vault_attachment_deletion")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("plan_activity_deletion")).not.toThrow();
       expect(() => assertBulkDeletionAllowed("plan_category_deletion")).not.toThrow();
     });

@@ -6,7 +6,9 @@ export const Route = createFileRoute("/api/vault/documents/attachments/$id")({
       DELETE: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
         const vaultStorage = await import("@/lib/server/vault-storage.server");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
+          assertBulkDeletionAllowed("vault_attachment_deletion");
           const user = await api.requireUser(request);
 
           if (!vaultStorage.isValidUuid(params.id)) {

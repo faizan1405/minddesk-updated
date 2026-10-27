@@ -30,6 +30,8 @@ import {
   Lock,
 } from "lucide-react";
 import { type DecryptedDocumentItem, useVault } from "./VaultContext";
+import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface DocumentDialogProps {
@@ -128,6 +130,8 @@ export async function validateDocumentFileMagicBytes(file: File): Promise<boolea
 
 export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDialogProps) {
   const { saveDocument } = useVault();
+  const { preservationMode } = useAuth();
+  const isPreserved = preservationMode ?? true;
 
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("Identity Documents");
@@ -257,6 +261,13 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
     e.preventDefault();
     if (!title.trim()) {
       toast.error("Document title is required.");
+      return;
+    }
+
+    if (isPreserved && removedAttachmentIds.length > 0) {
+      toast.error(
+        "Removing existing attachments is disabled while Data Preservation Mode is active.",
+      );
       return;
     }
 
@@ -467,9 +478,21 @@ export function DocumentDialog({ open, onOpenChange, editingItem }: DocumentDial
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeExistingAttachment(att.id)}
-                      title="Remove attachment"
+                      disabled={isPreserved}
+                      className={cn(
+                        "h-6 w-6",
+                        isPreserved
+                          ? "text-muted-foreground/40 cursor-not-allowed opacity-50"
+                          : "text-muted-foreground hover:text-destructive",
+                      )}
+                      onClick={() => {
+                        if (!isPreserved) removeExistingAttachment(att.id);
+                      }}
+                      title={
+                        isPreserved
+                          ? "Attachment removal is disabled while Data Preservation Mode is active"
+                          : "Remove attachment"
+                      }
                     >
                       <X className="h-3.5 w-3.5" />
                     </Button>
