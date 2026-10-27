@@ -89,6 +89,21 @@ export interface DecryptedDocumentItem {
 
 export type VaultStatus = "loading" | "uninitialized" | "locked" | "unlocked";
 
+export interface PendingPasswordChangeAttempt {
+  candidateWrappedKey: string;
+  candidateSaltHex: string;
+  candidateWrappedKeyIv: string;
+  baseVersion: number;
+  targetVersion: number;
+  timestamp: number;
+  iterations?: number;
+  memoryCost?: number;
+  parallelism?: number;
+}
+
+export type DelayedPasswordVerificationStatus =
+  "confirmed" | "unconfirmed" | "conflict" | "unreachable" | "unable_to_confirm";
+
 interface VaultContextType {
   status: VaultStatus;
   vaultMeta: VaultMetaResponse | null;
@@ -106,7 +121,19 @@ interface VaultContextType {
   setupVault: (masterPassword: string) => Promise<void>;
   unlockVault: (masterPassword: string) => Promise<boolean>;
   lockVault: () => void;
-  changeMasterPassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  changeMasterPassword: (
+    currentPassword: string,
+    newPassword: string,
+    accountPassword?: string,
+  ) => Promise<void>;
+  refreshVaultMeta: () => Promise<VaultMetaResponse | null>;
+  pendingPasswordChange: PendingPasswordChangeAttempt | null;
+  clearPendingPasswordChange: () => void;
+  verifyDelayedPasswordChange: (candidateNewPassword: string) => Promise<{
+    status: DelayedPasswordVerificationStatus;
+    message: string;
+    version?: number;
+  }>;
 
   // Password operations
   savePassword: (data: PasswordEntryData, id?: string, expectedVersion?: number) => Promise<void>;
@@ -145,6 +172,14 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const [status, setStatus] = useState<VaultStatus>("loading");
   const [vaultMeta, setVaultMeta] = useState<VaultMetaResponse | null>(null);
+  const pendingChangeRef = useRef<PendingPasswordChangeAttempt | null>(null);
+  const [pendingPasswordChange, setPendingPasswordChange] =
+    useState<PendingPasswordChangeAttempt | null>(null);
+
+  const clearPendingPasswordChange = useCallback(() => {
+    pendingChangeRef.current = null;
+    setPendingPasswordChange(null);
+  }, []);
 
   // In-memory ONLY references
   const rootKeyRef = useRef<Uint8Array | null>(null);
@@ -192,6 +227,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     }
     passKeyRef.current = null;
     docMetaKeyRef.current = null;
+    pendingChangeRef.current = null;
+    setPendingPasswordChange(null);
     setPasswords([]);
     setDocuments([]);
     setIsLoadingData(false);
@@ -476,9 +513,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
     [user, vaultMeta, timeoutMinutes, loadVaultData],
   );
 
-  // Change master password with local verification and optimistic concurrency protection
+  // Change master password with local verification, account password re-auth, and optimistic concurrency protection
   const changeMasterPassword = useCallback(
-    async (currentPassword: string, newPassword: string) => {
+    async (currentPassword: string, newPassword: string, accountPassword?: string) => {
       if (
         !rootKeyRef.current ||
         !vaultMeta ||
@@ -493,6 +530,9 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
       if (!newPassword || newPassword.length < 8) {
         throw new Error("New master password must be at least 8 characters.");
+      }
+      if (!accountPassword) {
+        throw new Error("Please enter your MindDesk account password.");
       }
 
       const gen = unlockGenerationRef.current;
@@ -531,15 +571,59 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Vault locked during password change.");
       }
 
+      // 3. Local Self-Unwrap Verification: Verify locally that new master password successfully unwraps
+      // the new wrapped key, and verify that the unwrapped key bytes match existing root encryption key
+      const verifiedUnwrappedKey = await unlockVault(
+        newPassword,
+        rewrapped.saltHex,
+        rewrapped.wrappedKey,
+        rewrapped.wrappedKeyIv,
+        {
+          iterations: vaultMeta.iterations,
+          memoryCost: vaultMeta.memory_cost,
+          parallelism: vaultMeta.parallelism,
+        },
+      );
+
+      const rootKey = rootKeyRef.current;
+      if (
+        !rootKey ||
+        verifiedUnwrappedKey.length !== rootKey.length ||
+        !verifiedUnwrappedKey.every((byte, idx) => byte === rootKey[idx])
+      ) {
+        throw new Error(
+          "Cryptographic self-check failed: newly wrapped key does not match root key. Update aborted for safety.",
+        );
+      }
+
+      // Preserve pending change attempt details in-memory for precise recovery
+      const attempt: PendingPasswordChangeAttempt = {
+        candidateWrappedKey: rewrapped.wrappedKey,
+        candidateSaltHex: rewrapped.saltHex,
+        candidateWrappedKeyIv: rewrapped.wrappedKeyIv,
+        baseVersion: vaultMeta.version,
+        targetVersion: vaultMeta.version + 1,
+        timestamp: Date.now(),
+        iterations: vaultMeta.iterations,
+        memoryCost: vaultMeta.memory_cost,
+        parallelism: vaultMeta.parallelism,
+      };
+      pendingChangeRef.current = attempt;
+      setPendingPasswordChange(attempt);
+
       try {
         const res = await changeVaultPasswordApi({
           salt: rewrapped.saltHex,
           wrapped_key: rewrapped.wrappedKey,
           wrapped_key_iv: rewrapped.wrappedKeyIv,
           expected_version: vaultMeta.version,
+          account_password: accountPassword,
         });
 
         if (unlockGenerationRef.current !== gen) return;
+
+        pendingChangeRef.current = null;
+        setPendingPasswordChange(null);
 
         setVaultMeta((prev) =>
           prev
@@ -555,18 +639,269 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
 
         toast.success("Master password updated successfully.");
       } catch (err: unknown) {
-        const errorObj = err as { status?: number; message?: string };
-        if (
-          errorObj?.status === 409 ||
-          errorObj?.message?.includes("Conflict") ||
-          errorObj?.message?.includes("409")
-        ) {
+        const errorObj = err as { status?: number; message?: string; error?: string };
+        const msg = errorObj?.error || errorObj?.message || "";
+
+        // Safe recovery check: if network dropped ambiguously, verify if the server actually committed the change
+        if (isAmbiguousNetworkError(err)) {
+          try {
+            const latestMeta = await fetchVaultMeta();
+            // Strict metadata verification:
+            // 1. Vault is initialized
+            // 2. Exact version increment (expected_version + 1)
+            // 3. Exact wrapped_key matches candidate
+            // 4. Exact salt matches candidate
+            // 5. Exact wrapped_key_iv matches candidate
+            const isExactMetadataMatch =
+              latestMeta.initialized &&
+              latestMeta.version === vaultMeta.version + 1 &&
+              latestMeta.wrapped_key === rewrapped.wrappedKey &&
+              latestMeta.salt === rewrapped.saltHex &&
+              latestMeta.wrapped_key_iv === rewrapped.wrappedKeyIv;
+
+            if (
+              isExactMetadataMatch &&
+              latestMeta.salt &&
+              latestMeta.wrapped_key &&
+              latestMeta.wrapped_key_iv
+            ) {
+              // 6. Cryptographic confirmation: verify that server's committed metadata can be unlocked
+              // with newPassword to yield the exact active root key byte-for-byte!
+              const recoveredKey = await unlockVault(
+                newPassword,
+                latestMeta.salt,
+                latestMeta.wrapped_key,
+                latestMeta.wrapped_key_iv,
+                {
+                  iterations: latestMeta.iterations,
+                  memoryCost: latestMeta.memory_cost,
+                  parallelism: latestMeta.parallelism,
+                },
+              );
+
+              const currentRootKey = rootKeyRef.current;
+              const keysMatch =
+                currentRootKey &&
+                recoveredKey.length === currentRootKey.length &&
+                recoveredKey.every((b, i) => b === currentRootKey[i]);
+
+              if (keysMatch) {
+                if (unlockGenerationRef.current !== gen) return;
+                pendingChangeRef.current = null;
+                setPendingPasswordChange(null);
+                setVaultMeta(latestMeta);
+                toast.success(
+                  "Master password updated successfully (verified after network reconnection).",
+                );
+                return;
+              }
+            }
+          } catch {
+            // Verification failed or could not be confirmed
+          }
+
+          // If recovery could not verify exact metadata & cryptographic match:
+          // NEVER report success! Do not alter local metadata or delete any entries/documents.
+          // REJECT with a clear error so the UI keeps the dialog open and displays recovery guidance!
+          const unconfirmedError = new Error(
+            "The connection was interrupted. We couldn't confirm whether your master password changed. Reconnect and verify your Vault status before trying again.",
+          );
+          toast.error(unconfirmedError.message);
+          throw unconfirmedError;
+        }
+
+        // Non-ambiguous definitive rejections from server
+        pendingChangeRef.current = null;
+        setPendingPasswordChange(null);
+
+        if (errorObj?.status === 409 || msg.includes("Conflict") || msg.includes("409")) {
           toast.error("Conflict: Master password was changed from another session. Please reload.");
+        } else if (errorObj?.status === 401 || msg.includes("account password")) {
+          toast.error("Incorrect MindDesk account password.");
+        } else if (errorObj?.status === 429 || msg.includes("Too many")) {
+          toast.error(msg || "Too many attempts. Please try again later.");
         }
         throw err;
       }
     },
     [vaultMeta],
+  );
+
+  // Safe refresh and verify current Vault metadata without modifying keys
+  const refreshVaultMeta = useCallback(async (): Promise<VaultMetaResponse | null> => {
+    try {
+      const meta = await fetchVaultMeta();
+      if (meta && meta.initialized) {
+        setVaultMeta(meta);
+      }
+      return meta;
+    } catch (err) {
+      console.error("[vault] Failed to refresh vault metadata:", err);
+      return null;
+    }
+  }, []);
+
+  // Safe verification helper for delayed or ambiguous master-password changes
+  // Compares actual committed key-wrap metadata against pending change attempt rather than mutable React version state
+  const verifyDelayedPasswordChange = useCallback(
+    async (
+      candidateNewPassword: string,
+    ): Promise<{
+      status: DelayedPasswordVerificationStatus;
+      message: string;
+      version?: number;
+    }> => {
+      if (!user) {
+        return {
+          status: "unable_to_confirm",
+          message: "User session is not active.",
+        };
+      }
+
+      const pendingAttempt = pendingChangeRef.current;
+
+      try {
+        const latestMeta = await fetchVaultMeta();
+        if (!latestMeta || !latestMeta.initialized) {
+          return {
+            status: "unreachable",
+            message: "Unable to retrieve Vault metadata from server.",
+          };
+        }
+
+        // If no pending attempt was recorded in this session (e.g. after page reload or vault was locked)
+        if (!pendingAttempt) {
+          // Cryptographically check if candidateNewPassword can unlock current server wrapped key
+          // and matches active rootKey if vault is currently unlocked
+          if (
+            rootKeyRef.current &&
+            candidateNewPassword &&
+            latestMeta.salt &&
+            latestMeta.wrapped_key &&
+            latestMeta.wrapped_key_iv
+          ) {
+            try {
+              const recoveredKey = await unlockVault(
+                candidateNewPassword,
+                latestMeta.salt,
+                latestMeta.wrapped_key,
+                latestMeta.wrapped_key_iv,
+                {
+                  iterations: latestMeta.iterations,
+                  memoryCost: latestMeta.memory_cost,
+                  parallelism: latestMeta.parallelism,
+                },
+              );
+              const currentRootKey = rootKeyRef.current;
+              const matchesCurrent =
+                currentRootKey &&
+                recoveredKey.length === currentRootKey.length &&
+                recoveredKey.every((b, i) => b === currentRootKey[i]);
+
+              if (matchesCurrent) {
+                setVaultMeta(latestMeta);
+                return {
+                  status: "confirmed",
+                  version: latestMeta.version,
+                  message: `Vault metadata confirmed on server (version ${latestMeta.version}). The master password matches your current session.`,
+                };
+              }
+            } catch {
+              // candidate password doesn't decrypt server wrapped key
+            }
+          }
+
+          return {
+            status: "unable_to_confirm",
+            message:
+              "Unable to confirm password change. Pending recovery details are no longer available in this session. Please lock your vault and unlock it using your intended master password to verify.",
+          };
+        }
+
+        // Case 1: The server committed the exact key-wrap metadata of the pending attempt!
+        // Verified by exact cryptographic key-wrap comparison, NOT merely mutable React version state.
+        const isCommittedPendingAttempt =
+          latestMeta.version === pendingAttempt.targetVersion &&
+          latestMeta.wrapped_key === pendingAttempt.candidateWrappedKey &&
+          latestMeta.salt === pendingAttempt.candidateSaltHex &&
+          latestMeta.wrapped_key_iv === pendingAttempt.candidateWrappedKeyIv;
+
+        if (isCommittedPendingAttempt) {
+          // Cryptographically confirm the candidate password unwraps the expected root key before reporting success!
+          if (!candidateNewPassword) {
+            return {
+              status: "unable_to_confirm",
+              message:
+                "Please enter the pending new master password to cryptographically confirm the update.",
+            };
+          }
+
+          if (latestMeta.salt && latestMeta.wrapped_key && latestMeta.wrapped_key_iv) {
+            try {
+              const recoveredKey = await unlockVault(
+                candidateNewPassword,
+                latestMeta.salt,
+                latestMeta.wrapped_key,
+                latestMeta.wrapped_key_iv,
+                {
+                  iterations: latestMeta.iterations ?? pendingAttempt.iterations,
+                  memoryCost: latestMeta.memory_cost ?? pendingAttempt.memoryCost,
+                  parallelism: latestMeta.parallelism ?? pendingAttempt.parallelism,
+                },
+              );
+
+              const currentRootKey = rootKeyRef.current;
+              const keysMatch =
+                currentRootKey &&
+                recoveredKey.length === currentRootKey.length &&
+                recoveredKey.every((b, i) => b === currentRootKey[i]);
+
+              if (keysMatch) {
+                setVaultMeta(latestMeta);
+                pendingChangeRef.current = null;
+                setPendingPasswordChange(null);
+                return {
+                  status: "confirmed",
+                  version: latestMeta.version,
+                  message: `Master password change confirmed on server (version ${latestMeta.version}). The new password is active.`,
+                };
+              }
+            } catch {
+              // Could not unlock with candidate password
+            }
+          }
+
+          return {
+            status: "unable_to_confirm",
+            message:
+              "Server metadata has updated, but the provided password does not cryptographically unwrap the active root key. Please verify your password or lock the vault.",
+          };
+        }
+
+        // Case 2: Server metadata is still at the base version -> delayed request has not committed yet
+        if (latestMeta.version === pendingAttempt.baseVersion) {
+          // Never claim old password definitely active because delayed request may still complete
+          return {
+            status: "unconfirmed",
+            version: latestMeta.version,
+            message: `Server metadata has not updated yet (version ${latestMeta.version}). The delayed change may still be processing on the server or the request was dropped. You may re-check, or lock the vault and test unlocking with your previous or new password.`,
+          };
+        }
+
+        // Case 3: Version changed to another value or key unwrap differs -> concurrent modification
+        return {
+          status: "conflict",
+          version: latestMeta.version,
+          message: `Vault metadata changed on server (version ${latestMeta.version}), but does not match the pending update. A concurrent change may have occurred. Please reload your vault.`,
+        };
+      } catch (err) {
+        return {
+          status: "unreachable",
+          message: "Network request failed. Please check your connection and try again.",
+        };
+      }
+    },
+    [user],
   );
 
   // Save (Create or Edit) Password Entry with optimistic concurrency & async lock safety
@@ -1097,6 +1432,12 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         unlockVault: unlockVaultAction,
         lockVault,
         changeMasterPassword,
+        get pendingPasswordChange() {
+          return pendingChangeRef.current;
+        },
+        clearPendingPasswordChange,
+        refreshVaultMeta,
+        verifyDelayedPasswordChange,
         savePassword,
         deletePassword,
         saveDocument,

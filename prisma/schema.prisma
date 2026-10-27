@@ -413,3 +413,17 @@ model VaultDocumentAttachment {
   @@index([userId])
   @@map("vault_document_attachments")
 }
+
+/// Persistent rate limiting and brute-force protection
+model AuthRateLimit {
+  id           String    @id @default(uuid()) @db.Char(36)
+  key          String    @unique @db.VarChar(128)
+  points       Int       @default(1)
+  firstAt      DateTime  @default(now()) @map("first_at")
+  lastAt       DateTime  @default(now()) @map("last_at")
+  blockedUntil DateTime? @map("blocked_until")
+
+  @@index([blockedUntil])
+  @@index([lastAt])
+  @@map("auth_rate_limits")
+}

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
@@ -480,7 +481,11 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
 
       await expect(
         act(async () => {
-          await vault.current.changeMasterPassword("WrongCurrentPassword!", "NewValidPassword123!");
+          await vault.current.changeMasterPassword(
+            "WrongCurrentPassword!",
+            "NewValidPassword123!",
+            "AccountPass123!",
+          );
         }),
       ).rejects.toThrow("Current master password is incorrect");
 
@@ -488,22 +493,46 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
       expect(apiSpy).not.toHaveBeenCalled();
     });
 
-    it("successfully changes master password when current password is verified locally", async () => {
+    it("rejects password change if account password is missing", async () => {
+      const vault = await setupUnlockedVault();
+      const apiSpy = vi.spyOn(vaultClient, "changeVaultPasswordApi");
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword("MasterPass123!", "NewValidPassword123!", "");
+        }),
+      ).rejects.toThrow("Please enter your MindDesk account password");
+
+      expect(apiSpy).not.toHaveBeenCalled();
+    });
+
+    it("successfully changes master password when current password and account password are provided", async () => {
       const vault = await setupUnlockedVault();
 
-      const apiSpy = vi.spyOn(vaultClient, "changeVaultPasswordApi").mockResolvedValue({
-        success: true,
-        version: 2,
-      });
+      let capturedPayload: any = null;
+      const apiSpy = vi
+        .spyOn(vaultClient, "changeVaultPasswordApi")
+        .mockImplementation(async (payload) => {
+          capturedPayload = payload;
+          return {
+            success: true,
+            version: 2,
+          };
+        });
 
       await act(async () => {
         // "MasterPass123!" was used in setupUnlockedVault
-        await vault.current.changeMasterPassword("MasterPass123!", "BrandNewMasterPass456!");
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
       });
 
       expect(apiSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           expected_version: 1,
+          account_password: "AccountPass123!",
           salt: expect.any(String),
           wrapped_key: expect.any(String),
           wrapped_key_iv: expect.any(String),
@@ -511,6 +540,28 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
       );
 
       expect(vault.current.vaultMeta?.version).toBe(2);
+
+      // Verify cryptographic self-check: new master password unwraps the new wrapped key,
+      // and old master password no longer unwraps it!
+      const { unlockVault } = await import("@/lib/vault-crypto");
+      const unwrappedWithNew = await unlockVault(
+        "BrandNewMasterPass456!",
+        capturedPayload.salt,
+        capturedPayload.wrapped_key,
+        capturedPayload.wrapped_key_iv,
+      );
+      expect(unwrappedWithNew).toBeDefined();
+      expect(unwrappedWithNew.length).toBe(32);
+
+      // Old master password fails to unwrap the newly rewrapped key
+      await expect(
+        unlockVault(
+          "MasterPass123!",
+          capturedPayload.salt,
+          capturedPayload.wrapped_key,
+          capturedPayload.wrapped_key_iv,
+        ),
+      ).rejects.toThrow();
     });
 
     it("handles 409 conflict when master password was modified from another device", async () => {
@@ -523,9 +574,461 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
 
       await expect(
         act(async () => {
-          await vault.current.changeMasterPassword("MasterPass123!", "BrandNewMasterPass456!");
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
         }),
       ).rejects.toMatchObject({ status: 409 });
+    });
+
+    it("ambiguous network recovery confirms exact version, wrapped key, salt, IV, and cryptographic key match", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 2,
+        };
+      });
+
+      await act(async () => {
+        await vault.current.changeMasterPassword(
+          "MasterPass123!",
+          "BrandNewMasterPass456!",
+          "AccountPass123!",
+        );
+      });
+
+      expect(vault.current.vaultMeta?.version).toBe(2);
+      expect(vault.current.vaultMeta?.wrapped_key).toBe(capturedPayload.wrapped_key);
+    });
+
+    it("ambiguous network recovery rejects and does not update when salt is mismatched", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: "different_salt_1234567890abcdef",
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 2,
+        };
+      });
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects and does not update when IV is mismatched", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: "mismatched_iv_1234567890abcdef",
+          version: 2,
+        };
+      });
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects when version has not incremented (delayed server commit)", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 1,
+        };
+      });
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("ambiguous network recovery rejects when concurrent change happened (version jumped to 3)", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => {
+        return {
+          initialized: true,
+          salt: capturedPayload.salt,
+          iterations: 3,
+          memory_cost: 19456,
+          parallelism: 1,
+          wrapped_key: capturedPayload.wrapped_key,
+          wrapped_key_iv: capturedPayload.wrapped_key_iv,
+          version: 3,
+        };
+      });
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("verifyDelayedPasswordChange confirms and updates state when delayed commit succeeded on server", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      // 1. Initial attempt fails due to lost connection and server verification returns old version
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "old_key",
+        wrapped_key_iv: "old_iv",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+      expect(vault.current.pendingPasswordChange).not.toBeNull();
+
+      // 2. Later, delayed commit finishes on server; fetchVaultMeta now returns version 2 with matching candidate payload
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: capturedPayload.salt,
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: capturedPayload.wrapped_key,
+        wrapped_key_iv: capturedPayload.wrapped_key_iv,
+        version: 2,
+      }));
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("confirmed");
+      expect(result.version).toBe(2);
+      expect(vault.current.vaultMeta?.version).toBe(2);
+      expect(vault.current.pendingPasswordChange).toBeNull();
+    });
+
+    it("verifyDelayedPasswordChange succeeds even if metadata was refreshed before verification (e.g. reopening Settings)", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "old_key",
+        wrapped_key_iv: "old_iv",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.pendingPasswordChange).not.toBeNull();
+
+      // Simulate reopening Settings dialog: fetchVaultMeta returns version 2, and refreshVaultMeta runs!
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: capturedPayload.salt,
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: capturedPayload.wrapped_key,
+        wrapped_key_iv: capturedPayload.wrapped_key_iv,
+        version: 2,
+      }));
+
+      await act(async () => {
+        await vault.current.refreshVaultMeta();
+      });
+
+      // Now mutable local React state is already version 2!
+      expect(vault.current.vaultMeta?.version).toBe(2);
+
+      // Verify that verifyDelayedPasswordChange does NOT falsely report unchanged!
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("confirmed");
+      expect(result.version).toBe(2);
+      expect(vault.current.pendingPasswordChange).toBeNull();
+    });
+
+    it("verifyDelayedPasswordChange reports unconfirmed when delayed commit was not processed", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "key_v1",
+        wrapped_key_iv: "iv_v1",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("unconfirmed");
+      expect(result.version).toBe(1);
+      expect(result.message).toContain("Server metadata has not updated yet");
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("locking the vault while recovery is pending clears pending recovery details and wipes memory keys", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "key_v1",
+        wrapped_key_iv: "iv_v1",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.pendingPasswordChange).not.toBeNull();
+
+      // User locks the vault
+      act(() => {
+        vault.current.lockVault();
+      });
+
+      expect(vault.current.status).toBe("locked");
+      expect(vault.current.pendingPasswordChange).toBeNull();
+    });
+
+    it("verifyDelayedPasswordChange returns unable_to_confirm when recovery details are not available (e.g. after reload)", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "different_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "unrelated_wrapped_key",
+        wrapped_key_iv: "unrelated_iv",
+        version: 1,
+      }));
+
+      // No pendingPasswordChange in memory
+      expect(vault.current.pendingPasswordChange).toBeNull();
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("RandomPass123!");
+      });
+
+      expect(result.status).toBe("unable_to_confirm");
+      expect(result.message).toContain("Unable to confirm password change");
+      expect(result.message).toContain("lock your vault and unlock it");
+    });
+
+    it("verifyDelayedPasswordChange safely detects concurrent modification conflict", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async () => {
+        throw new TypeError("Failed to fetch");
+      });
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "key_v1",
+        wrapped_key_iv: "iv_v1",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      // Another session commits version 4
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "concurrent_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "concurrent_key",
+        wrapped_key_iv: "concurrent_iv",
+        version: 4,
+      }));
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("conflict");
+      expect(result.version).toBe(4);
+      expect(vault.current.vaultMeta?.version).toBe(1);
     });
   });
 

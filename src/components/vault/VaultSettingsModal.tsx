@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ShieldCheck, KeyRound, Clock, Eye, EyeOff } from "lucide-react";
+import { ShieldCheck, KeyRound, Clock, Eye, EyeOff, Loader2, RefreshCw } from "lucide-react";
 import { useVault } from "./VaultContext";
 import { toast } from "sonner";
 
@@ -27,14 +27,65 @@ interface VaultSettingsModalProps {
 }
 
 export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalProps) {
-  const { timeoutMinutes, setTimeoutMinutes, changeMasterPassword } = useVault();
+  const {
+    timeoutMinutes,
+    setTimeoutMinutes,
+    changeMasterPassword,
+    refreshVaultMeta,
+    verifyDelayedPasswordChange,
+    pendingPasswordChange,
+  } = useVault();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showAccountPassword, setShowAccountPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
+
+  // Refresh vault metadata when modal opens
+  useEffect(() => {
+    if (open) {
+      refreshVaultMeta();
+    }
+  }, [open, refreshVaultMeta]);
+
+  const handleVerifyStatus = async () => {
+    if (!newPassword) {
+      toast.error("Please enter the new master password to verify its status.");
+      return;
+    }
+    setIsCheckingStatus(true);
+    try {
+      const res = await verifyDelayedPasswordChange(newPassword);
+      setStatusFeedback(res.message);
+      if (res.status === "confirmed") {
+        toast.success(res.message);
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setAccountPassword("");
+        setErrorMsg(null);
+        setStatusFeedback(null);
+        onOpenChange(false);
+      } else if (res.status === "unconfirmed") {
+        toast.info(res.message);
+      } else if (res.status === "unable_to_confirm") {
+        toast.error(res.message);
+      } else if (res.status === "conflict") {
+        toast.error(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -54,16 +105,26 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
       toast.error("New passwords do not match.");
       return;
     }
+    if (!accountPassword) {
+      toast.error("Please enter your MindDesk account password.");
+      return;
+    }
 
     setIsChangingPassword(true);
+    setErrorMsg(null);
+    setStatusFeedback(null);
     try {
-      await changeMasterPassword(currentPassword, newPassword);
+      await changeMasterPassword(currentPassword, newPassword, accountPassword);
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
+      setAccountPassword("");
+      setErrorMsg(null);
       onOpenChange(false);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to change master password.");
+      const msg = err instanceof Error ? err.message : "Failed to change master password.";
+      setErrorMsg(msg);
+      toast.error(msg);
     } finally {
       setIsChangingPassword(false);
     }
@@ -80,7 +141,8 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
             <DialogTitle className="text-base font-semibold">Vault Security Settings</DialogTitle>
           </div>
           <DialogDescription className="text-xs">
-            Manage your master password and auto-lock security preferences.
+            Manage your master password, account re-authentication, and auto-lock security
+            preferences.
           </DialogDescription>
         </DialogHeader>
 
@@ -206,13 +268,101 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
               />
             </div>
 
+            {/* MindDesk Account Password (Identity Re-Authentication) */}
+            <div className="space-y-1.5 pt-1 border-t border-border/50">
+              <Label
+                htmlFor="account-password"
+                className="text-xs flex items-center justify-between"
+              >
+                <span>MindDesk Account Password</span>
+                <span className="text-[10px] text-muted-foreground font-normal">
+                  Re-authentication
+                </span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="account-password"
+                  type={showAccountPassword ? "text" : "password"}
+                  placeholder="Enter your MindDesk login password"
+                  value={accountPassword}
+                  onChange={(e) => setAccountPassword(e.target.value)}
+                  className="pr-10 text-xs"
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAccountPassword((prev) => !prev)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showAccountPassword ? (
+                    <EyeOff className="h-3.5 w-3.5" />
+                  ) : (
+                    <Eye className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {(errorMsg || pendingPasswordChange) && (
+              <div className="space-y-2">
+                <div
+                  role="alert"
+                  className="p-2.5 rounded-md bg-destructive/10 text-destructive text-xs leading-relaxed border border-destructive/20"
+                >
+                  <p>
+                    {errorMsg ||
+                      "A previous master password change could not be confirmed due to a network interruption. Reconnect, enter the pending new password below, and verify your Vault status."}
+                  </p>
+                  {statusFeedback && (
+                    <p className="mt-1.5 font-medium text-foreground text-[11px] bg-background/50 p-1.5 rounded border border-border/50">
+                      {statusFeedback}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isCheckingStatus || isChangingPassword}
+                  onClick={handleVerifyStatus}
+                  className="w-full text-xs h-7 gap-1.5"
+                >
+                  {isCheckingStatus ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Checking Vault Status...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3" />
+                      Verify Vault Status
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+
             <Button
               type="submit"
               size="sm"
-              disabled={isChangingPassword || !currentPassword || !newPassword}
-              className="w-full text-xs gap-1.5 h-8 mt-1"
+              disabled={
+                isChangingPassword ||
+                !currentPassword ||
+                !newPassword ||
+                !confirmPassword ||
+                !accountPassword
+              }
+              className="w-full text-xs gap-1.5 h-8 mt-2"
             >
-              {isChangingPassword ? "Rewrapping Keys..." : "Update Master Password"}
+              {isChangingPassword ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Verifying & Rewrapping...
+                </>
+              ) : (
+                "Update Master Password"
+              )}
             </Button>
           </form>
         </div>

@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, AlertTriangle } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
+  const [rateLimitMessage, setRateLimitMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) navigate({ to: "/", replace: true }); // "/" opens the start page chosen in Settings
@@ -36,10 +37,16 @@ function AuthPage() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setRateLimitMessage(null);
     try {
       await signIn(email, password);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Something went wrong");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      const status = (err as { status?: number })?.status;
+      if (status === 429 || msg.toLowerCase().includes("too many")) {
+        setRateLimitMessage(msg);
+      }
+      toast.error(msg);
     } finally {
       setBusy(false);
     }
@@ -55,6 +62,16 @@ function AuthPage() {
         </div>
 
         <div className="rounded-2xl border bg-card p-6 shadow-sm">
+          {rateLimitMessage && (
+            <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+              <div className="flex items-center gap-1.5 font-medium">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                <span>Temporary Security Delay</span>
+              </div>
+              <p className="mt-1 text-[11px] leading-relaxed opacity-90">{rateLimitMessage}</p>
+            </div>
+          )}
+
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -64,7 +81,10 @@ function AuthPage() {
                 required
                 autoComplete="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setRateLimitMessage(null);
+                }}
                 className="h-11 rounded-xl"
               />
             </div>
@@ -77,7 +97,10 @@ function AuthPage() {
                 minLength={1}
                 autoComplete="current-password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setRateLimitMessage(null);
+                }}
                 className="h-11 rounded-xl"
               />
             </div>
@@ -91,4 +114,3 @@ function AuthPage() {
     </div>
   );
 }
-
