@@ -33,6 +33,7 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
     changeMasterPassword,
     refreshVaultMeta,
     verifyDelayedPasswordChange,
+    pendingPasswordChange,
   } = useVault();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -72,8 +73,10 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
         setErrorMsg(null);
         setStatusFeedback(null);
         onOpenChange(false);
-      } else if (res.status === "unchanged") {
+      } else if (res.status === "unconfirmed") {
         toast.info(res.message);
+      } else if (res.status === "unable_to_confirm") {
+        toast.error(res.message);
       } else if (res.status === "conflict") {
         toast.error(res.message);
       } else {
@@ -301,13 +304,16 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
               </div>
             </div>
 
-            {errorMsg && (
+            {(errorMsg || pendingPasswordChange) && (
               <div className="space-y-2">
                 <div
                   role="alert"
                   className="p-2.5 rounded-md bg-destructive/10 text-destructive text-xs leading-relaxed border border-destructive/20"
                 >
-                  <p>{errorMsg}</p>
+                  <p>
+                    {errorMsg ||
+                      "A previous master password change could not be confirmed due to a network interruption. Reconnect, enter the pending new password below, and verify your Vault status."}
+                  </p>
                   {statusFeedback && (
                     <p className="mt-1.5 font-medium text-foreground text-[11px] bg-background/50 p-1.5 rounded border border-border/50">
                       {statusFeedback}
