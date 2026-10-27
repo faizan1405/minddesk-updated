@@ -359,8 +359,8 @@ export function DataSection() {
       <Card title="Import a backup">
         <p className="text-sm text-muted-foreground">Restoring from a backup isn't available yet. Keep your exported files safe — they'll work with import once it's added.</p>
       </Card>
-      <Card tone="danger" title="Delete my data" description="Permanently deletes all your tasks, lists, notes, projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in and preferences stay.">
-        <Button variant="destructive" className="h-11 rounded-xl" disabled={!!user?.preview} onClick={() => setDelOpen(true)}>Delete my data…</Button>
+      <Card tone="danger" title="Delete workspace data" description="Permanently deletes all your tasks, lists, notes (and uploaded note images), projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords & documents) remain safe.">
+        <Button variant="destructive" className="h-11 rounded-xl" disabled={!!user?.preview} onClick={() => setDelOpen(true)}>Delete workspace data…</Button>
         {user?.preview && <PreviewNote>Not available in Preview Mode.</PreviewNote>}
       </Card>
       <DeleteDataDialog open={delOpen} onOpenChange={setDelOpen} onDone={() => { qc.clear(); window.location.assign("/"); }} />
@@ -374,7 +374,7 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
   const [error, setError] = useState<string | null>(null);
   const del = useMutation({
     mutationFn: () => api("/api/data/delete", { method: "POST", body: { password, confirm } }),
-    onSuccess: () => { toast.success("Your data was deleted"); onDone(); },
+    onSuccess: () => { toast.success("Workspace data was deleted"); onDone(); },
     onError: (e) => setError(e instanceof Error ? e.message : "Couldn't delete"),
   });
   useEffect(() => { if (open) { setPassword(""); setConfirm(""); setError(null); } }, [open]);
@@ -382,8 +382,8 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="rounded-2xl">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete all your data?</AlertDialogTitle>
-          <AlertDialogDescription>This can't be undone. Export a backup first if you might need it.</AlertDialogDescription>
+          <AlertDialogTitle>Delete workspace data?</AlertDialogTitle>
+          <AlertDialogDescription>This permanently deletes all your workspace notes, tasks, projects, plans, mind maps, habits, and uploaded images. Your account, sign-in, preferences, and My Private Vault (passwords and documents) remain safe. This cannot be undone. Export a backup first if you might need it.</AlertDialogDescription>
         </AlertDialogHeader>
         <form id="del-form" className="space-y-3" onSubmit={(e) => { e.preventDefault(); del.mutate(); }}>
           <Input type="password" autoComplete="current-password" placeholder="Your password" value={password}
@@ -394,7 +394,7 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <Button type="submit" form="del-form" variant="destructive" disabled={!password || confirm !== "DELETE" || del.isPending}>
-            {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete my data"}
+            {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete workspace data"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

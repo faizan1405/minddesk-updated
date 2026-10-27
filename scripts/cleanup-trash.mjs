@@ -2,6 +2,43 @@
 // Intended to be run periodically (e.g. daily at midnight) via Hostinger Cron Jobs or Node CLI:
 // node scripts/cleanup-trash.mjs
 import { PrismaClient } from "@prisma/client";
+import { unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
+
+function getStorageDir() {
+  if (process.env.STORAGE_DIR) {
+    return resolve(process.env.STORAGE_DIR);
+  }
+  if (existsSync("/home/u256504187")) {
+    return "/home/u256504187/storage/minddesk-uploads";
+  }
+  return resolve(process.cwd(), "storage/uploads");
+}
+
+function getSafeImagePath(storageDir, storageKey) {
+  if (!storageKey || typeof storageKey !== "string") return null;
+  if (/[\0/\\]/.test(storageKey) || storageKey.includes("..")) return null;
+  const resolvedDir = resolve(storageDir);
+  const resolvedPath = resolve(resolvedDir, storageKey);
+  const prefix = resolvedDir.endsWith(sep) ? resolvedDir : resolvedDir + sep;
+  if (!resolvedPath.startsWith(prefix)) return null;
+  return resolvedPath;
+}
+
+function extractImageIds(content) {
+  if (!content) return [];
+  const ids = new Set();
+  const str = typeof content === "string" ? content : JSON.stringify(content);
+  if (str) {
+    const regex = /\/api\/images\/([a-zA-Z0-9_-]+)(?:\.[a-zA-Z0-9]+)?/g;
+    let m;
+    while ((m = regex.exec(str)) !== null) {
+      if (m[1]) ids.add(m[1]);
+    }
+  }
+  return Array.from(ids);
+}
 
 const prisma = new PrismaClient();
 const RETENTION_DAYS = 30;
@@ -24,9 +61,8 @@ async function main() {
       // 1. Pages (subpages): Protect active or non-expired child pages of expired parent pages
       const expiredPages = await tx.page.findMany({
         where: whereExpired,
-        select: { id: true },
+        select: { id: true, userId: true, content: true },
       });
-      const expiredPageIds = expiredPages.map((p) => p.id);
 
       if (expiredPageIds.length > 0) {
         await tx.page.updateMany({
@@ -122,6 +158,63 @@ async function main() {
       const routinesRes = await tx.routine.deleteMany({ where: whereExpired });
       const tasksRes = await tx.task.deleteMany({ where: whereExpired });
       const listsRes = await tx.taskList.deleteMany({ where: whereExpired });
+
+      // Clean up note images for expired pages, preserving any referenced by surviving notes
+      const storageDir = getStorageDir();
+      const expiredPageIds = expiredPages.map((p) => p.id);
+      const userExpiredPages = new Map();
+      for (const ep of expiredPages) {
+        const list = userExpiredPages.get(ep.userId) || [];
+        list.push(ep);
+        userExpiredPages.set(ep.userId, list);
+      }
+
+      for (const [uid, uPages] of userExpiredPages.entries()) {
+        const candidateIds = new Set();
+        for (const p of uPages) {
+          for (const id of extractImageIds(p.content)) candidateIds.add(id);
+        }
+        const candidateList = Array.from(candidateIds);
+        if (candidateList.length === 0) continue;
+
+        // Check surviving pages for this user
+        const surviving = await tx.page.findMany({
+          where: {
+            userId: uid,
+            id: { notIn: expiredPageIds },
+            OR: candidateList.map((id) => ({ content: { contains: id } })),
+          },
+          select: { content: true },
+        });
+        const preserved = new Set();
+        for (const sp of surviving) {
+          for (const id of extractImageIds(sp.content)) {
+            if (candidateIds.has(id)) preserved.add(id);
+          }
+        }
+        const toDelete = candidateList.filter((id) => !preserved.has(id));
+        if (toDelete.length > 0) {
+          const imgRecords = await tx.noteImage.findMany({
+            where: { userId: uid, id: { in: toDelete } },
+            select: { id: true, storageKey: true },
+          });
+          if (imgRecords.length > 0) {
+            await tx.noteImage.deleteMany({
+              where: { userId: uid, id: { in: imgRecords.map((r) => r.id) } },
+            });
+            for (const r of imgRecords) {
+              try {
+                const safePath = getSafeImagePath(storageDir, r.storageKey);
+                if (safePath) await unlink(safePath);
+              } catch (err) {
+                if (err?.code !== "ENOENT")
+                  console.warn("[cleanup-trash] Warning unlinking image:", err);
+              }
+            }
+          }
+        }
+      }
+
       const pagesRes = await tx.page.deleteMany({ where: whereExpired });
       const projectsRes = await tx.project.deleteMany({ where: whereExpired });
       const eventsRes = await tx.event.deleteMany({ where: whereExpired });

@@ -1,4 +1,5 @@
 import { db, ApiError } from "@/lib/server/api.server";
+import { cleanupNoteImagesForPages } from "@/lib/server/images.server";
 
 export type TrashItemType =
   "note" | "task" | "task_list" | "project" | "mind_map" | "event" | "habit" | "routine";
@@ -582,7 +583,10 @@ export async function permanentlyDeleteItem(
           data: { parentId: null },
         });
 
-        // 3. Permanently delete the note
+        // 3. Clean up unreferenced note images (preserves images referenced by surviving notes)
+        await cleanupNoteImagesForPages(userId, [{ id: page.id, content: page.content }], tx);
+
+        // 4. Permanently delete the note
         await tx.page.delete({ where: { id: page.id } });
         return { success: true, id };
       }
@@ -695,7 +699,7 @@ export async function cleanupExpiredTrash(options?: { simulatedCutoff?: Date }):
     // 1. Pages (subpages): Protect active or non-expired child pages of expired parent pages
     const expiredPages = await tx.page.findMany({
       where: whereExpired,
-      select: { id: true },
+      select: { id: true, userId: true, content: true },
     });
     const expiredPageIds = expiredPages.map((p) => p.id);
 
@@ -802,7 +806,18 @@ export async function cleanupExpiredTrash(options?: { simulatedCutoff?: Date }):
     // 4. Task lists (tasks cascade)
     const listsRes = await tx.taskList.deleteMany({ where: whereExpired });
 
-    // 5. Pages
+    // 5. Pages: clean up unreferenced note images for all expired pages before deleting them
+    const userExpiredPages = new Map<string, Array<{ id: string; content: string }>>();
+    for (const ep of expiredPages) {
+      const list = userExpiredPages.get(ep.userId) || [];
+      list.push({ id: ep.id, content: ep.content });
+      userExpiredPages.set(ep.userId, list);
+    }
+
+    for (const [uid, pages] of userExpiredPages.entries()) {
+      await cleanupNoteImagesForPages(uid, pages, tx);
+    }
+
     const pagesRes = await tx.page.deleteMany({ where: whereExpired });
 
     // 6. Projects (pages cascade)
