@@ -647,7 +647,7 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
             "AccountPass123!",
           );
         }),
-      ).rejects.toThrow("could not be verified");
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -682,7 +682,7 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
             "AccountPass123!",
           );
         }),
-      ).rejects.toThrow("could not be verified");
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -717,7 +717,7 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
             "AccountPass123!",
           );
         }),
-      ).rejects.toThrow("could not be verified");
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
 
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
@@ -752,8 +752,111 @@ describe("Vault Workflow: Document Creation, Lifecycle, Concurrency & Rollback",
             "AccountPass123!",
           );
         }),
-      ).rejects.toThrow("could not be verified");
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
 
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("verifyDelayedPasswordChange confirms and updates state when delayed commit succeeded on server", async () => {
+      const vault = await setupUnlockedVault();
+
+      let capturedPayload: any = null;
+      vi.spyOn(vaultClient, "changeVaultPasswordApi").mockImplementation(async (payload) => {
+        capturedPayload = payload;
+        throw new TypeError("Failed to fetch");
+      });
+
+      // 1. Initial attempt fails due to lost connection and server verification returns old version
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "old_key",
+        wrapped_key_iv: "old_iv",
+        version: 1,
+      }));
+
+      await expect(
+        act(async () => {
+          await vault.current.changeMasterPassword(
+            "MasterPass123!",
+            "BrandNewMasterPass456!",
+            "AccountPass123!",
+          );
+        }),
+      ).rejects.toThrow("couldn't confirm whether your master password changed");
+
+      expect(vault.current.vaultMeta?.version).toBe(1);
+
+      // 2. Later, delayed commit finishes on server; fetchVaultMeta now returns version 2 with matching candidate payload
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: capturedPayload.salt,
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: capturedPayload.wrapped_key,
+        wrapped_key_iv: capturedPayload.wrapped_key_iv,
+        version: 2,
+      }));
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("confirmed");
+      expect(result.version).toBe(2);
+      expect(vault.current.vaultMeta?.version).toBe(2);
+    });
+
+    it("verifyDelayedPasswordChange safely reports unchanged and leaves metadata intact when delayed commit was not processed", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "some_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "key_v1",
+        wrapped_key_iv: "iv_v1",
+        version: 1,
+      }));
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("unchanged");
+      expect(result.version).toBe(1);
+      expect(vault.current.vaultMeta?.version).toBe(1);
+    });
+
+    it("verifyDelayedPasswordChange safely detects concurrent modification conflict", async () => {
+      const vault = await setupUnlockedVault();
+
+      vi.spyOn(vaultClient, "fetchVaultMeta").mockImplementation(async () => ({
+        initialized: true,
+        salt: "concurrent_salt",
+        iterations: 3,
+        memory_cost: 19456,
+        parallelism: 1,
+        wrapped_key: "concurrent_key",
+        wrapped_key_iv: "concurrent_iv",
+        version: 4,
+      }));
+
+      let result: any = null;
+      await act(async () => {
+        result = await vault.current.verifyDelayedPasswordChange("BrandNewMasterPass456!");
+      });
+
+      expect(result.status).toBe("conflict");
+      expect(result.version).toBe(4);
       expect(vault.current.vaultMeta?.version).toBe(1);
     });
   });

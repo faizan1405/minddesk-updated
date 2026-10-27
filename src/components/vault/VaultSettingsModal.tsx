@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ShieldCheck, KeyRound, Clock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ShieldCheck, KeyRound, Clock, Eye, EyeOff, Loader2, RefreshCw } from "lucide-react";
 import { useVault } from "./VaultContext";
 import { toast } from "sonner";
 
@@ -27,7 +27,13 @@ interface VaultSettingsModalProps {
 }
 
 export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalProps) {
-  const { timeoutMinutes, setTimeoutMinutes, changeMasterPassword } = useVault();
+  const {
+    timeoutMinutes,
+    setTimeoutMinutes,
+    changeMasterPassword,
+    refreshVaultMeta,
+    verifyDelayedPasswordChange,
+  } = useVault();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -38,6 +44,45 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
   const [showAccountPassword, setShowAccountPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(false);
+  const [statusFeedback, setStatusFeedback] = useState<string | null>(null);
+
+  // Refresh vault metadata when modal opens
+  useEffect(() => {
+    if (open) {
+      refreshVaultMeta();
+    }
+  }, [open, refreshVaultMeta]);
+
+  const handleVerifyStatus = async () => {
+    if (!newPassword) {
+      toast.error("Please enter the new master password to verify its status.");
+      return;
+    }
+    setIsCheckingStatus(true);
+    try {
+      const res = await verifyDelayedPasswordChange(newPassword);
+      setStatusFeedback(res.message);
+      if (res.status === "confirmed") {
+        toast.success(res.message);
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setAccountPassword("");
+        setErrorMsg(null);
+        setStatusFeedback(null);
+        onOpenChange(false);
+      } else if (res.status === "unchanged") {
+        toast.info(res.message);
+      } else if (res.status === "conflict") {
+        toast.error(res.message);
+      } else {
+        toast.error(res.message);
+      }
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,6 +109,7 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
 
     setIsChangingPassword(true);
     setErrorMsg(null);
+    setStatusFeedback(null);
     try {
       await changeMasterPassword(currentPassword, newPassword, accountPassword);
       setCurrentPassword("");
@@ -256,11 +302,38 @@ export function VaultSettingsModal({ open, onOpenChange }: VaultSettingsModalPro
             </div>
 
             {errorMsg && (
-              <div
-                role="alert"
-                className="p-2 rounded-md bg-destructive/10 text-destructive text-xs leading-relaxed border border-destructive/20"
-              >
-                {errorMsg}
+              <div className="space-y-2">
+                <div
+                  role="alert"
+                  className="p-2.5 rounded-md bg-destructive/10 text-destructive text-xs leading-relaxed border border-destructive/20"
+                >
+                  <p>{errorMsg}</p>
+                  {statusFeedback && (
+                    <p className="mt-1.5 font-medium text-foreground text-[11px] bg-background/50 p-1.5 rounded border border-border/50">
+                      {statusFeedback}
+                    </p>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isCheckingStatus || isChangingPassword}
+                  onClick={handleVerifyStatus}
+                  className="w-full text-xs h-7 gap-1.5"
+                >
+                  {isCheckingStatus ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Checking Vault Status...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-3 w-3" />
+                      Verify Vault Status
+                    </>
+                  )}
+                </Button>
               </div>
             )}
 

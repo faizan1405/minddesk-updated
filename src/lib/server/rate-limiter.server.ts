@@ -143,10 +143,19 @@ export function getTrustedProxyStrategy(): TrustedProxyStrategy {
  *   unless Cloudflare origin pull is authenticated.
  * - If X-Real-IP is absent or invalid, returns "untrusted-proxy-client".
  *
- * Conservative Security Note:
- * - Because Hostinger LiteSpeed internal configuration cannot be verified from within Node.js without
- *   root access, account-level rate limiting and in-flight admission control are enforced simultaneously
- *   and do not rely on IP address guarantees.
+ * Conservative Reverse-Proxy Security Note:
+ * - Verified: Live production inspection confirms MindDesk is served behind LiteSpeed Web Server
+ *   (`Server: LiteSpeed`, `platform: hostinger`, `panel: hpanel`).
+ * - Documented LiteSpeed Behavior: In standard Hostinger reverse-proxy deployments, LiteSpeed populates
+ *   `X-Real-IP` with the client socket's IP address. Untrusted client headers (`CF-Connecting-IP`,
+ *   `X-Forwarded-For`) are ignored in Hostinger mode.
+ * - Documented Uncertainty: The presence of `Server: LiteSpeed` does not by itself prove how `X-Real-IP`
+ *   is rewritten under every edge routing configuration, and internal LiteSpeed config files cannot be
+ *   inspected from within Node.js without root privileges.
+ * - Multi-Layer Defense: Because IP trust carries inherent reverse-proxy uncertainties, account-level
+ *   protection (`login:account:<email>`, 5 attempts per 15 minutes) and in-flight admission control
+ *   operate completely independently of IP headers, ensuring attackers cannot bypass account lockout
+ *   or brute-force protection even if proxy headers were spoofed.
  */
 export function extractClientIp(request: Request): string {
   const strategy = getTrustedProxyStrategy();
@@ -217,9 +226,21 @@ export function createRateLimitError(
 
 /**
  * Pre-verification Admission Controller:
- * Limits the number of simultaneously in-flight authentication operations per IP and account.
- * This prevents parallel bursts from bypassing rate checks before failed attempts are committed,
- * and eliminates CPU exhaustion attacks targeting expensive scrypt operations.
+ *
+ * ARCHITECTURAL CONCURRENCY BOUNDARY (PROCESS-LOCAL):
+ * Note that this admission controller operates in process-local Node.js memory (`inFlightRequests`).
+ * Therefore, its concurrency limits (max 2 in-flight verifications per account, max 5 per IP)
+ * apply PER NODE.JS PROCESS. In a multi-process or clustered deployment (e.g. multiple Node.js
+ * worker processes or containers), each individual worker process enforces this admission cap
+ * locally; it is NOT a distributed cross-process synchronization lock.
+ *
+ * Distributed, cluster-wide rate limiting and brute-force protection across all workers
+ * is authoritatively provided by MySQL row-level locking (`SELECT ... FOR UPDATE` on
+ * the `auth_rate_limits` table in `recordFailedAttempt` and `checkRateLimit`).
+ *
+ * Purpose:
+ * Protects the local process from parallel bursts of expensive `scrypt` CPU exhaustion attacks
+ * and throttles simultaneous verification races before failed attempts are committed to MySQL.
  *
  * Returns a release function that MUST be invoked in a finally block.
  */

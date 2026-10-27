@@ -111,6 +111,12 @@ interface VaultContextType {
     newPassword: string,
     accountPassword?: string,
   ) => Promise<void>;
+  refreshVaultMeta: () => Promise<VaultMetaResponse | null>;
+  verifyDelayedPasswordChange: (candidateNewPassword: string) => Promise<{
+    status: "confirmed" | "unchanged" | "conflict" | "unreachable";
+    message: string;
+    version?: number;
+  }>;
 
   // Password operations
   savePassword: (data: PasswordEntryData, id?: string, expectedVersion?: number) => Promise<void>;
@@ -651,7 +657,7 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
           // NEVER report success! Do not alter local metadata or delete any entries/documents.
           // REJECT with a clear error so the UI keeps the dialog open and displays recovery guidance!
           const unconfirmedError = new Error(
-            "Network connection was interrupted and the server update could not be verified. Your master password has NOT been changed. Please check your connection and try again.",
+            "The connection was interrupted. We couldn't confirm whether your master password changed. Reconnect and verify your Vault status before trying again.",
           );
           toast.error(unconfirmedError.message);
           throw unconfirmedError;
@@ -668,6 +674,111 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [vaultMeta],
+  );
+
+  // Safe refresh and verify current Vault metadata without modifying keys
+  const refreshVaultMeta = useCallback(async (): Promise<VaultMetaResponse | null> => {
+    try {
+      const meta = await fetchVaultMeta();
+      if (meta && meta.initialized) {
+        setVaultMeta(meta);
+      }
+      return meta;
+    } catch (err) {
+      console.error("[vault] Failed to refresh vault metadata:", err);
+      return null;
+    }
+  }, []);
+
+  // Safe verification helper for delayed or ambiguous master-password changes
+  const verifyDelayedPasswordChange = useCallback(
+    async (
+      candidateNewPassword: string,
+    ): Promise<{
+      status: "confirmed" | "unchanged" | "conflict" | "unreachable";
+      message: string;
+      version?: number;
+    }> => {
+      if (!user || !vaultMeta) {
+        return {
+          status: "unreachable",
+          message: "Vault is not initialized.",
+        };
+      }
+
+      try {
+        const latestMeta = await fetchVaultMeta();
+        if (!latestMeta || !latestMeta.initialized) {
+          return {
+            status: "unreachable",
+            message: "Unable to retrieve Vault metadata from server.",
+          };
+        }
+
+        // Case 1: Server metadata is still at current version -> Delayed commit was not processed
+        if (latestMeta.version === vaultMeta.version) {
+          return {
+            status: "unchanged",
+            version: latestMeta.version,
+            message: `Vault metadata is unchanged (version ${latestMeta.version}). Your previous master password remains active.`,
+          };
+        }
+
+        // Case 2: Server metadata incremented by exactly 1 -> Candidate for delayed commit
+        if (latestMeta.version === vaultMeta.version + 1) {
+          if (
+            latestMeta.salt &&
+            latestMeta.wrapped_key &&
+            latestMeta.wrapped_key_iv &&
+            candidateNewPassword
+          ) {
+            try {
+              const recoveredKey = await unlockVault(
+                candidateNewPassword,
+                latestMeta.salt,
+                latestMeta.wrapped_key,
+                latestMeta.wrapped_key_iv,
+                {
+                  iterations: latestMeta.iterations,
+                  memoryCost: latestMeta.memory_cost,
+                  parallelism: latestMeta.parallelism,
+                },
+              );
+
+              const currentRootKey = rootKeyRef.current;
+              const keysMatch =
+                currentRootKey &&
+                recoveredKey.length === currentRootKey.length &&
+                recoveredKey.every((b, i) => b === currentRootKey[i]);
+
+              if (keysMatch) {
+                setVaultMeta(latestMeta);
+                return {
+                  status: "confirmed",
+                  version: latestMeta.version,
+                  message: `Master password change confirmed on server (version ${latestMeta.version}). The new password is active.`,
+                };
+              }
+            } catch {
+              // Could not unlock with candidate password
+            }
+          }
+        }
+
+        // Case 3: Version changed to another value or key unwrap failed -> Conflict
+        return {
+          status: "conflict",
+          version: latestMeta.version,
+          message: `Vault metadata changed on server (version ${latestMeta.version}), but does not match the pending new password. A concurrent change may have occurred. Please reload.`,
+        };
+      } catch (err) {
+        return {
+          status: "unreachable",
+          message: "Network request failed. Please check your connection and try again.",
+        };
+      }
+    },
+    [user, vaultMeta],
   );
 
   // Save (Create or Edit) Password Entry with optimistic concurrency & async lock safety
@@ -1198,6 +1309,8 @@ export function VaultProvider({ children }: { children: React.ReactNode }) {
         unlockVault: unlockVaultAction,
         lockVault,
         changeMasterPassword,
+        refreshVaultMeta,
+        verifyDelayedPasswordChange,
         savePassword,
         deletePassword,
         saveDocument,
