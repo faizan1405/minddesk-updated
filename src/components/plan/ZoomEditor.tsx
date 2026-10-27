@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
+import { useAuth } from "@/hooks/use-auth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { colorVar } from "@/lib/calendar";
@@ -46,6 +47,8 @@ export function ZoomEditor({
 }: { target: EditorTarget | null; onClose: () => void; day: string; blocks: Block[]; categories: PlanCategory[]; onFocus?: (activityId: string) => void }) {
   const isMobile = useIsMobile();
   const actions = usePlanActions();
+  const { preservationMode } = useAuth();
+  const isPreserved = preservationMode ?? true;
   const [form, setForm] = useState<Form | null>(null);
   const initial = useRef<string>("");
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -363,12 +366,44 @@ export function ZoomEditor({
               <>
                 <Button variant="ghost" size="sm" onClick={skipDay}>Skip this day</Button>
                 {editing.modified && <Button variant="ghost" size="sm" className="gap-1.5" onClick={resetDay}><RotateCcw className="h-3.5 w-3.5" />Restore day</Button>}
-                <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "gap-1.5",
+                    isPreserved
+                      ? "text-muted-foreground/40 cursor-not-allowed"
+                      : "text-destructive hover:text-destructive",
+                  )}
+                  disabled={isPreserved}
+                  title={
+                    isPreserved
+                      ? "Activity deletion is disabled while Data Preservation Mode is active"
+                      : undefined
+                  }
+                  onClick={() => setConfirmDelete(true)}
+                >
                   <Trash2 className="h-3.5 w-3.5" /> Routine
                 </Button>
               </>
             ) : (
-              <Button variant="ghost" size="sm" className="gap-1.5 text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "gap-1.5",
+                  isPreserved
+                    ? "text-muted-foreground/40 cursor-not-allowed"
+                    : "text-destructive hover:text-destructive",
+                )}
+                disabled={isPreserved}
+                title={
+                  isPreserved
+                    ? "Activity deletion is disabled while Data Preservation Mode is active"
+                    : undefined
+                }
+                onClick={() => setConfirmDelete(true)}
+              >
                 <Trash2 className="h-3.5 w-3.5" /> Delete
               </Button>
             ))}
@@ -389,9 +424,17 @@ export function ZoomEditor({
         onConfirm={() => { setConfirmDiscard(false); onClose(); }} />
       <ConfirmDialog open={confirmDelete} onOpenChange={setConfirmDelete}
         title={recurring ? "Delete this whole routine?" : "Delete this activity?"}
-        description={recurring ? "It will be removed from every day. To remove just this day, use Skip this day." : "This can't be undone."}
+        description={
+          isPreserved
+            ? "Data Preservation Mode is active. Deleting planned activities is disabled to protect your schedule."
+            : recurring
+              ? "It will be removed from every day. To remove just this day, use Skip this day."
+              : "This can't be undone."
+        }
+        confirmLabel={isPreserved ? "Deletion Disabled" : "Delete"}
+        confirmDisabled={isPreserved}
         onConfirm={async () => {
-          if (editing) await actions.deleteActivity.mutateAsync(editing.activity.id).catch(() => {});
+          if (editing && !isPreserved) await actions.deleteActivity.mutateAsync(editing.activity.id).catch(() => {});
           setConfirmDelete(false); onClose();
         }} />
     </>

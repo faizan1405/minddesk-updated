@@ -16,7 +16,7 @@ export function useAuth() {
   const qc = useQueryClient();
   const me = useQuery({
     queryKey: meKey,
-    queryFn: () => api<{ user: AuthUser | null }>("/api/auth/me"),
+    queryFn: () => api<{ user: AuthUser | null; preservation_mode?: boolean }>("/api/auth/me"),
     staleTime: 60_000,
     retry: false,
   });
@@ -47,6 +47,7 @@ export function useAuth() {
 
   return {
     user: me.data?.user ?? null,
+    preservationMode: me.data?.preservation_mode ?? true,
     loading: me.isPending,
     error: me.error,
     retry: me.refetch,

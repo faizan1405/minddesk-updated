@@ -302,7 +302,7 @@ export function AccessibilitySection() {
 }
 
 // ---------------- 8. Data & Backup ----------------
-type Counts = Record<"task_lists" | "tasks" | "notes" | "project_pages" | "projects" | "events" | "plan_activities" | "mind_maps" | "habits" | "routines", number>;
+type Counts = Record<"task_lists" | "tasks" | "notes" | "project_pages" | "projects" | "events" | "plan_activities" | "mind_maps" | "habits" | "routines", number> & { preservation_mode?: boolean };
 const COUNT_LABEL: [keyof Counts, string][] = [
   ["tasks", "Tasks"], ["task_lists", "Task lists"], ["notes", "Notes"], ["projects", "Projects"], ["project_pages", "Project pages"],
   ["events", "Calendar events"], ["plan_activities", "Planned activities"], ["mind_maps", "Mind maps"], ["habits", "Habits"], ["routines", "Routines"],
@@ -314,6 +314,7 @@ export function DataSection() {
   const counts = useQuery({ queryKey: ["data-summary"], queryFn: () => api<Counts>("/api/data/summary") });
   const [exporting, setExporting] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
+  const isPreservationActive = counts.data?.preservation_mode ?? true;
 
   async function exportData() {
     setExporting(true);
@@ -359,22 +360,29 @@ export function DataSection() {
       <Card title="Import a backup">
         <p className="text-sm text-muted-foreground">Restoring from a backup isn't available yet. Keep your exported files safe — they'll work with import once it's added.</p>
       </Card>
-      <Card tone="danger" title="Delete my data" description="Permanently deletes all your tasks, lists, notes, projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in and preferences stay.">
-        <Button variant="destructive" className="h-11 rounded-xl" disabled={!!user?.preview} onClick={() => setDelOpen(true)}>Delete my data…</Button>
+      <Card tone="danger" title="Delete workspace data" description="Permanently deletes all your tasks, lists, notes, projects, calendar events, plans and focus history, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords & documents) remain safe.">
+        <Button variant="destructive" className="h-11 rounded-xl" disabled={!!user?.preview || isPreservationActive} onClick={() => setDelOpen(true)}>
+          {isPreservationActive ? "Workspace deletion disabled" : "Delete workspace data…"}
+        </Button>
+        {isPreservationActive && (
+          <p className="mt-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+            Disabled: Data Preservation Mode is active to safeguard your workspace records from permanent deletion.
+          </p>
+        )}
         {user?.preview && <PreviewNote>Not available in Preview Mode.</PreviewNote>}
       </Card>
-      <DeleteDataDialog open={delOpen} onOpenChange={setDelOpen} onDone={() => { qc.clear(); window.location.assign("/"); }} />
+      <DeleteDataDialog open={delOpen} onOpenChange={setDelOpen} onDone={() => { qc.clear(); window.location.assign("/"); }} isPreservationActive={isPreservationActive} />
     </div>
   );
 }
 
-function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void }) {
+function DeleteDataDialog({ open, onOpenChange, onDone, isPreservationActive = true }: { open: boolean; onOpenChange: (o: boolean) => void; onDone: () => void; isPreservationActive?: boolean }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const del = useMutation({
     mutationFn: () => api("/api/data/delete", { method: "POST", body: { password, confirm } }),
-    onSuccess: () => { toast.success("Your data was deleted"); onDone(); },
+    onSuccess: () => { toast.success("Workspace data was deleted"); onDone(); },
     onError: (e) => setError(e instanceof Error ? e.message : "Couldn't delete"),
   });
   useEffect(() => { if (open) { setPassword(""); setConfirm(""); setError(null); } }, [open]);
@@ -382,10 +390,15 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="rounded-2xl">
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete all your data?</AlertDialogTitle>
-          <AlertDialogDescription>This can't be undone. Export a backup first if you might need it.</AlertDialogDescription>
+          <AlertDialogTitle>Delete workspace data?</AlertDialogTitle>
+          <AlertDialogDescription>This permanently deletes all your workspace notes, tasks, projects, plans, mind maps, habits and routines. Your account, sign-in, preferences, and My Private Vault (passwords and documents) remain safe. This cannot be undone. Export a backup first if you might need it.</AlertDialogDescription>
         </AlertDialogHeader>
-        <form id="del-form" className="space-y-3" onSubmit={(e) => { e.preventDefault(); del.mutate(); }}>
+        {isPreservationActive && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+            Data Preservation Mode is active. Permanent workspace deletion is disabled to prevent accidental data loss.
+          </div>
+        )}
+        <form id="del-form" className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (!isPreservationActive) del.mutate(); }}>
           <Input type="password" autoComplete="current-password" placeholder="Your password" value={password}
             onChange={(e) => setPassword(e.target.value)} aria-label="Password" className="h-11 rounded-xl" />
           <Input placeholder='Type DELETE to confirm' value={confirm} onChange={(e) => setConfirm(e.target.value)} aria-label="Type DELETE to confirm" className="h-11 rounded-xl" />
@@ -393,8 +406,8 @@ function DeleteDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpe
         </form>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <Button type="submit" form="del-form" variant="destructive" disabled={!password || confirm !== "DELETE" || del.isPending}>
-            {del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete my data"}
+          <Button type="submit" form="del-form" variant="destructive" disabled={isPreservationActive || !password || confirm !== "DELETE" || del.isPending}>
+            {isPreservationActive ? "Deletion disabled" : del.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete workspace data"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

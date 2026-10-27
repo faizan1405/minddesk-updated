@@ -632,8 +632,19 @@ export async function exportUserData(user: {
   };
 }
 
-/** Removes all workspace content for one user in a single transaction. The account and preferences remain. */
+/**
+ * Removes workspace content for one user in a single transaction.
+ * Scope:
+ * - Deletes tasks, task lists, projects, pages (notes), calendar events,
+ *   plan categories, plan activities, focus sessions, mind maps, routines, habits,
+ *   and habit completions.
+ * - Intentionally preserved: User account, login sessions, preferences, and
+ *   My Private Vault (vault_meta, vault_entries, vault_documents, vault_document_attachments,
+ *   and encrypted document files in storage/vault-documents remain strictly untouched).
+ */
 export async function deleteUserData(userId: string) {
+  const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
+  assertBulkDeletionAllowed("workspace_deletion");
   const p = db();
   const where = { userId };
   await p.$transaction([

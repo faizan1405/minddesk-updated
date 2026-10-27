@@ -187,6 +187,9 @@ export async function deleteEncryptedAttachmentFile(
   userId: string,
   attachmentId: string,
 ): Promise<void> {
+  const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
+  assertBulkDeletionAllowed("vault_attachment_deletion");
+
   if (!isValidUuid(attachmentId)) {
     throw new ApiError(400, "Invalid attachment ID: must be a valid UUID.");
   }
@@ -241,14 +244,21 @@ export interface ReconcileStorageResult {
 export async function reconcileAbandonedVaultStorage(
   options?: ReconcileStorageOptions | number,
 ): Promise<ReconcileStorageResult> {
+  const { isDataPreservationMode } = await import("@/lib/server/preservation.server");
+  const isPreserved = isDataPreservationMode();
+
   const olderThanMs =
     typeof options === "number" ? options : (options?.olderThanMs ?? 2 * 60 * 60 * 1000);
-  const dryRun =
+  const requestedDryRun =
     typeof options === "object" && options.dryRun !== undefined
       ? options.dryRun
       : typeof options === "number"
         ? false
         : false;
+
+  // While Data Preservation Mode is active, storage reconciliation is strictly non-destructive.
+  // Force dryRun to true regardless of requested options.
+  const dryRun = isPreserved ? true : requestedDryRun;
 
   const { readdir, stat } = await import("node:fs/promises");
   const storageDir = getVaultStorageDir();
@@ -286,7 +296,7 @@ export async function reconcileAbandonedVaultStorage(
 
       if (!record) {
         candidates.push(fileName);
-        if (!dryRun) {
+        if (!dryRun && !isPreserved) {
           await unlink(filePath);
           cleanedFiles++;
         }

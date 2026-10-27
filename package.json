@@ -16,6 +16,7 @@
     "start": "node .output/server/index.mjs",
     "db:migrate": "prisma migrate deploy",
     "trash:cleanup": "node scripts/cleanup-trash.mjs",
+    "images:reconcile": "node scripts/reconcile-note-images.mjs",
     "postinstall": "prisma generate"
   },
   "overrides": {
