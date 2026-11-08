@@ -1,10 +1,30 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import {
-  Trash2, RotateCcw, Search, X, CheckSquare, List, NotebookPen, FolderKanban,
-  CalendarDays, Network, Repeat, Flame, Info, AlertTriangle, Lock,
+  Trash2,
+  RotateCcw,
+  Search,
+  X,
+  CheckSquare,
+  List,
+  NotebookPen,
+  FolderKanban,
+  CalendarDays,
+  Network,
+  Repeat,
+  Flame,
+  Info,
+  AlertTriangle,
+  Lock,
+  Shield,
 } from "lucide-react";
-import { useTrash, useTrashActions, type TrashFilter, type TrashItem, formatType } from "@/lib/trash";
+import {
+  useTrash,
+  useTrashActions,
+  type TrashFilter,
+  type TrashItem,
+  formatType,
+} from "@/lib/trash";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -16,9 +36,15 @@ export const Route = createFileRoute("/_authenticated/trash")({
   head: () => ({
     meta: [
       { title: "Recycle Bin — MindDesk" },
-      { name: "description", content: "Recover or permanently delete deleted items within 30 days." },
+      {
+        name: "description",
+        content: "Recover or permanently delete deleted items within 30 days.",
+      },
       { property: "og:title", content: "Recycle Bin — MindDesk" },
-      { property: "og:description", content: "Recover or permanently delete deleted items within 30 days." },
+      {
+        property: "og:description",
+        content: "Recover or permanently delete deleted items within 30 days.",
+      },
     ],
   }),
   component: RecycleBinPage,
@@ -82,6 +108,8 @@ export function RecycleBinPage() {
   const [itemToDelete, setItemToDelete] = useState<TrashItem | null>(null);
   const [confirmEmpty, setConfirmEmpty] = useState(false);
   const [confirmRestoreAll, setConfirmRestoreAll] = useState(false);
+  const isPreservationActive = data?.preservation_mode ?? true;
+  const isStrictActive = data?.strict_mode ?? isPreservationActive;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} onRetry={() => refetch()} />;
@@ -133,28 +161,54 @@ export function RecycleBinPage() {
             <Button
               variant="destructive"
               size="sm"
-              disabled={actions.isEmptying || items.length === 0}
+              disabled={isPreservationActive || actions.isEmptying || items.length === 0}
               onClick={() => setConfirmEmpty(true)}
               className="gap-1.5"
+              title={
+                isPreservationActive
+                  ? "Emptying the Recycle Bin is disabled while Data Preservation Mode is active"
+                  : undefined
+              }
             >
               <Trash2 className="h-4 w-4" />
-              <span>{filter === "all" ? "Empty Recycle Bin" : "Empty Category"}</span>
+              <span>
+                {isPreservationActive
+                  ? "Emptying Disabled"
+                  : filter === "all"
+                    ? "Empty Recycle Bin"
+                    : "Empty Category"}
+              </span>
             </Button>
           </div>
         )}
       </div>
 
-      {/* 30-Day Auto-Deletion Banner */}
-      <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-xs text-muted-foreground sm:text-sm">
-        <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
-        <div className="space-y-0.5">
-          <p className="font-medium text-foreground">30-Day Recovery Window</p>
-          <p>
-            When items are deleted from MindDesk, they move here for 30 days. Restoring recovers all original
-            content, hierarchy, and associations. After 30 days, expired items are permanently purged.
-          </p>
+      {/* 30-Day Auto-Deletion Banner / Data Preservation Banner */}
+      {isPreservationActive ? (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-muted-foreground sm:text-sm">
+          <Shield className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="font-medium text-foreground">Data Preservation Mode Active</p>
+            <p>
+              Automatic 30-day retention purging and emptying the Recycle Bin are disabled to
+              prevent accidental data loss. Deleted items remain safely preserved in the Recycle Bin
+              indefinitely. You can restore any item at any time.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-start gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3.5 text-xs text-muted-foreground sm:text-sm">
+          <Info className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="font-medium text-foreground">30-Day Recovery Window</p>
+            <p>
+              When items are deleted from MindDesk, they move here for 30 days. Restoring recovers
+              all original content, hierarchy, and associations. After 30 days, expired items are
+              permanently purged.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Filter Tabs and Search Bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -179,7 +233,9 @@ export function RecycleBinPage() {
                 <span
                   className={cn(
                     "rounded-full px-1.5 py-0.2 text-[10px] font-semibold",
-                    active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-background text-muted-foreground",
+                    active
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-background text-muted-foreground",
                   )}
                 >
                   {count}
@@ -219,7 +275,8 @@ export function RecycleBinPage() {
             </div>
             <h3 className="mt-4 text-base font-semibold">Recycle Bin is empty</h3>
             <p className="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
-              Items you delete from tasks, notes, projects, mind maps, calendar, or habits will remain here for 30 days.
+              Items you delete from tasks, notes, projects, mind maps, calendar, or habits will
+              remain here for 30 days.
             </p>
           </div>
         ) : (
@@ -248,11 +305,17 @@ export function RecycleBinPage() {
                       <span className="font-medium text-sm truncate max-w-md" title={item.title}>
                         {item.title}
                       </span>
-                      <Badge variant="outline" className="text-[10px] font-normal uppercase tracking-wider py-0 px-1.5">
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-normal uppercase tracking-wider py-0 px-1.5"
+                      >
                         {formatType(item.type)}
                       </Badge>
                       {item.is_locked && (
-                        <Badge variant="outline" className="gap-1 border-amber-500/30 text-amber-600 dark:text-amber-400 text-[10px] py-0 px-1.5">
+                        <Badge
+                          variant="outline"
+                          className="gap-1 border-amber-500/30 text-amber-600 dark:text-amber-400 text-[10px] py-0 px-1.5"
+                        >
                           <Lock className="h-2.5 w-2.5" />
                           Locked
                         </Badge>
@@ -304,9 +367,18 @@ export function RecycleBinPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => setItemToDelete(item)}
-                      disabled={actions.isDeletingPermanently}
-                      title="Permanently remove from database"
-                      className="h-8 gap-1 px-2.5 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      disabled={isStrictActive || actions.isDeletingPermanently}
+                      title={
+                        isStrictActive
+                          ? "Permanent deletion is disabled by Data Preservation Mode. You can restore this item."
+                          : "Permanently remove from database"
+                      }
+                      className={cn(
+                        "h-8 gap-1 px-2.5 text-xs",
+                        isStrictActive
+                          ? "text-muted-foreground cursor-not-allowed opacity-50"
+                          : "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                      )}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">Delete</span>
@@ -325,13 +397,16 @@ export function RecycleBinPage() {
         onOpenChange={(open) => !open && setItemToDelete(null)}
         title={`Permanently delete "${itemToDelete?.title}"?`}
         description={
-          itemToDelete?.is_locked
-            ? "This mind map is currently locked. You must unlock it before it can be deleted."
-            : "This action cannot be undone. This item and any dependent content will be immediately and permanently removed from MySQL."
+          isStrictActive
+            ? "Data Preservation Mode is active. Permanent single-item deletion is disabled to prevent accidental data loss. You can restore this item instead."
+            : itemToDelete?.is_locked
+              ? "This mind map is currently locked. You must unlock it before it can be deleted."
+              : "This action cannot be undone. This item and any dependent content will be immediately and permanently removed from MySQL."
         }
-        confirmLabel="Delete Permanently"
+        confirmLabel={isStrictActive ? "Deletion Disabled" : "Delete Permanently"}
+        confirmDisabled={isStrictActive}
         onConfirm={() => {
-          if (itemToDelete) {
+          if (itemToDelete && !isStrictActive) {
             actions.permanentlyDelete({ type: itemToDelete.type, id: itemToDelete.id });
             setItemToDelete(null);
           }
@@ -342,12 +417,23 @@ export function RecycleBinPage() {
       <ConfirmDialog
         open={confirmEmpty}
         onOpenChange={setConfirmEmpty}
-        title={filter === "all" ? "Empty Recycle Bin?" : `Empty ${filterTabs.find((f) => f.key === filter)?.label}?`}
-        description="All items in this view will be permanently deleted from MySQL. This action is irreversible. Active and locked items remain safe."
-        confirmLabel="Empty Recycle Bin"
+        title={
+          filter === "all"
+            ? "Empty Recycle Bin?"
+            : `Empty ${filterTabs.find((f) => f.key === filter)?.label}?`
+        }
+        description={
+          isPreservationActive
+            ? "Data Preservation Mode is active. Emptying the Recycle Bin is disabled to safeguard all deleted records."
+            : "All items in this view will be permanently deleted from MySQL. This action is irreversible. Active and locked items remain safe."
+        }
+        confirmLabel={isPreservationActive ? "Emptying Disabled" : "Empty Recycle Bin"}
+        confirmDisabled={isPreservationActive}
         onConfirm={() => {
-          actions.emptyTrash(filter);
-          setConfirmEmpty(false);
+          if (!isPreservationActive) {
+            actions.emptyTrash(filter);
+            setConfirmEmpty(false);
+          }
         }}
       />
 
@@ -355,7 +441,11 @@ export function RecycleBinPage() {
       <ConfirmDialog
         open={confirmRestoreAll}
         onOpenChange={setConfirmRestoreAll}
-        title={filter === "all" ? "Restore all items?" : `Restore all ${filterTabs.find((f) => f.key === filter)?.label}?`}
+        title={
+          filter === "all"
+            ? "Restore all items?"
+            : `Restore all ${filterTabs.find((f) => f.key === filter)?.label}?`
+        }
         description="All deleted items will be returned to their original places with their hierarchy and content intact."
         confirmLabel="Restore All"
         onConfirm={() => {

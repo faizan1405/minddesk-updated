@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ChevronRight, FileDown, FileText, Layers, MoreHorizontal, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileDown, FileText, Layers, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,34 +24,76 @@ const fmtDate = (iso: string) => {
 function NoteCard({ page, pages, context }: { page: PageMeta; pages: PageMeta[]; context?: string | undefined }) {
   const kids = pages.filter((p) => p.parent_id === page.id).length;
   const date = fmtDate(page.updated_at);
+  const { togglePinPage, deletePage, renamePage } = usePageActions();
+  const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const desc = descendantCount(pages, page.id);
+
   return (
-    <Link
-      to="/notes/$pageId"
-      params={{ pageId: page.id }}
-      className="flex min-h-[60px] items-center gap-3 rounded-xl border bg-card px-3.5 py-3 outline-none transition-[transform,background-color] duration-150 active:scale-[0.99] active:bg-accent focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none motion-reduce:active:scale-100"
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <FileText className="h-4 w-4" aria-hidden />
-      </span>
-      <span className="min-w-0 flex-1">
-        {context && <span className="block truncate text-[11px] text-muted-foreground">{context}</span>}
-        <span className="flex items-center gap-1.5 min-w-0">
-          <span className={cn("block truncate text-[15px] font-medium", !page.title.trim() && "text-muted-foreground")}>
-            {pageTitle(page)}
+    <>
+      <div className="group relative flex min-h-[60px] items-center gap-3 rounded-xl border bg-card px-3.5 py-3 outline-none transition-[transform,background-color] duration-150 hover:bg-accent/50 focus-within:ring-2 focus-within:ring-ring motion-reduce:transition-none">
+        <Link
+          to="/notes/$pageId"
+          params={{ pageId: page.id }}
+          className="flex min-w-0 flex-1 items-center gap-3 outline-none"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FileText className="h-4 w-4" aria-hidden />
           </span>
-          {page.is_pinned && (
-            <Pin className="h-3.5 w-3.5 shrink-0 rotate-45 fill-primary/20 text-primary" aria-label="Pinned" />
-          )}
-        </span>
-        <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-          {date && <span>Edited {date}</span>}
-          {kids > 0 && (
-            <span className="flex items-center gap-1"><Layers className="h-3 w-3" aria-hidden />{kids} subpage{kids === 1 ? "" : "s"}</span>
-          )}
-        </span>
-      </span>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-    </Link>
+          <span className="min-w-0 flex-1">
+            {context && <span className="block truncate text-[11px] text-muted-foreground">{context}</span>}
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className={cn("block truncate text-[15px] font-medium", !page.title.trim() && "text-muted-foreground")}>
+                {pageTitle(page)}
+              </span>
+              {page.is_pinned && (
+                <Pin className="h-3.5 w-3.5 shrink-0 rotate-45 fill-primary/20 text-primary" aria-label="Pinned" />
+              )}
+            </span>
+            <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+              {date && <span>Edited {date}</span>}
+              {kids > 0 && (
+                <span className="flex items-center gap-1"><Layers className="h-3 w-3" aria-hidden />{kids} subpage{kids === 1 ? "" : "s"}</span>
+              )}
+            </span>
+          </span>
+        </Link>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Note options"
+              onClick={(e) => e.stopPropagation()}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground active:scale-95"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onSelect={() => togglePinPage.mutate({ id: page.id, pinned: !page.is_pinned })}>
+              {page.is_pinned ? <PinOff className="mr-2 h-4 w-4" /> : <Pin className="mr-2 h-4 w-4" />}
+              <span>{page.is_pinned ? "Unpin note" : "Pin note"}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setRenaming(true)}>
+              <Pencil className="mr-2 h-4 w-4 text-muted-foreground" />
+              <span>Rename</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              <span>Delete note</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <TextPromptDialog open={renaming} onOpenChange={setRenaming} title="Rename note" initial={page.title}
+        placeholder="Untitled" onSubmit={(v) => renamePage.mutateAsync({ id: page.id, title: v })} />
+      <ConfirmDialog open={deleting} onOpenChange={setDeleting} title={`Delete "${pageTitle(page)}"?`}
+        description={desc ? `This note and its ${desc} subpage${desc === 1 ? "" : "s"} will be moved to the Recycle Bin. You can restore them within 30 days.` : "This note will be moved to the Recycle Bin. You can restore it within 30 days."}
+        confirmLabel="Move to Recycle Bin"
+        onConfirm={() => deletePage.mutate(page.id)} />
+    </>
   );
 }
 
@@ -200,13 +242,17 @@ export function NoteMobileBar({
             <span>Export as PDF</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>Delete</DropdownMenuItem>
+          <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            <span>Delete note</span>
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <TextPromptDialog open={renaming} onOpenChange={setRenaming} title="Rename note" initial={current.title}
         placeholder="Untitled" onSubmit={(v) => renamePage.mutateAsync({ id: current.id, title: v })} />
       <ConfirmDialog open={deleting} onOpenChange={setDeleting} title={`Delete "${pageTitle(current)}"?`}
-        description={desc ? `Its ${desc} subpage${desc === 1 ? "" : "s"} will be deleted too. This can't be undone.` : "This can't be undone."}
+        description={desc ? `This note and its ${desc} subpage${desc === 1 ? "" : "s"} will be moved to the Recycle Bin. You can restore them within 30 days.` : "This note will be moved to the Recycle Bin. You can restore it within 30 days."}
+        confirmLabel="Move to Recycle Bin"
         onConfirm={() => deletePage.mutate(current.id, { onSuccess: goBack })} />
     </div>
   );

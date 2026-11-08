@@ -5,9 +5,14 @@ export const Route = createFileRoute("/api/data/summary")({
     handlers: {
       GET: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
+        const { isDataPreservationMode } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
-          return api.json(await api.dataCounts(user.id));
+          const counts = await api.dataCounts(user.id);
+          return api.json({
+            ...counts,
+            preservation_mode: isDataPreservationMode(),
+          });
         });
       },
     },

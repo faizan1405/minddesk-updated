@@ -17,7 +17,9 @@ export const Route = createFileRoute("/api/plan/activities/$id")({
       },
       DELETE: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
+          assertBulkDeletionAllowed("plan_activity_deletion");
           const user = await api.requireUser(request);
           const res = await api.db().planActivity.deleteMany({ where: { id: params.id, userId: user.id } });
           if (res.count === 0) throw new api.ApiError(404, "Activity not found");

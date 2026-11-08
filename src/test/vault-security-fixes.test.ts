@@ -24,6 +24,7 @@ describe("Vault Security and Functional Fixes Regression Suite", () => {
     process.env = {
       ...originalEnv,
       DATABASE_URL: "mysql://mock",
+      DATA_PRESERVATION_MODE: "disabled",
       VAULT_STORAGE_DIR: tempDir,
     };
     delete (globalThis as any).__prisma;

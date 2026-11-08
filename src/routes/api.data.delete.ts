@@ -3,7 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/api/data/delete")({
   server: {
     handlers: {
-      // Deletes all workspace content of the signed-in user (account, sign-in and preferences stay).
+      // Deletes workspace content of the signed-in user (notes, tasks, projects, plans, mind maps, habits).
+      // Account, sessions, preferences, and My Private Vault (passwords & documents) remain safe and preserved.
       POST: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
         const {
@@ -14,8 +15,11 @@ export const Route = createFileRoute("/api/data/delete")({
           acquireAdmission,
         } = await import("@/lib/server/rate-limiter.server");
         const { z } = await import("zod");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
 
         return api.handle(async () => {
+          assertBulkDeletionAllowed("workspace_deletion");
+
           const user = await api.requireUser(request);
           const b = z
             .object({ password: z.string().min(1).max(200), confirm: z.literal("DELETE") })

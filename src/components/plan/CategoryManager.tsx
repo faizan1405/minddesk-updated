@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -24,6 +25,8 @@ function ColorPick({ value, onChange }: { value: string; onChange: (c: string) =
 
 function Row({ c }: { c: PlanCategory }) {
   const { updateCategory, deleteCategory } = usePlanActions();
+  const { preservationMode } = useAuth();
+  const isPreserved = preservationMode ?? true;
   const [name, setName] = useState(c.name);
   const commit = () => { const n = name.trim(); if (n && n !== c.name) updateCategory.mutate({ id: c.id, name: n }); else setName(c.name); };
   return (
@@ -34,7 +37,16 @@ function Row({ c }: { c: PlanCategory }) {
       {c.is_default ? (
         <span className="w-9 shrink-0 text-center text-[10px] text-muted-foreground">default</span>
       ) : (
-        <Button variant="ghost" size="icon" aria-label={`Delete ${c.name}`} onClick={() => deleteCategory.mutate(c.id)}><Trash2 className="h-4 w-4" /></Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`Delete ${c.name}`}
+          disabled={isPreserved}
+          title={isPreserved ? "Category deletion is disabled while Data Preservation Mode is active" : `Delete ${c.name}`}
+          onClick={() => { if (!isPreserved) deleteCategory.mutate(c.id); }}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
       )}
     </li>
   );

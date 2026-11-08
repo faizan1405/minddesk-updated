@@ -60,7 +60,9 @@ export const Route = createFileRoute("/api/vault/entries/$id")({
 
       DELETE: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
+          assertBulkDeletionAllowed("vault_entry_deletion");
           const user = await api.requireUser(request);
 
           const existing = await api.db().vaultEntry.findFirst({

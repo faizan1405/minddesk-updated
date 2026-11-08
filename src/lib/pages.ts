@@ -89,7 +89,7 @@ export function usePageActions() {
     mutationFn: (id: string) => api(`/api/pages/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       refreshPages();
-      toast.success("Page deleted");
+      toast.success("Note moved to Recycle Bin", { description: "You can restore it within 30 days from the Recycle Bin." });
     },
     onError: fail("Couldn't delete page"),
   });
@@ -169,11 +169,13 @@ export function setPagePinInCache(
 
 /** All descendant ids of a page (for "delete" warnings). */
 export function descendantCount(pages: PageMeta[], id: string): number {
+  if (!Array.isArray(pages)) return 0;
   const kids = pages.filter((p) => p.parent_id === id);
   return kids.reduce((n, k) => n + 1 + descendantCount(pages, k.id), 0);
 }
 
 export function ancestors(pages: PageMeta[], id: string): PageMeta[] {
+  if (!Array.isArray(pages)) return [];
   const out: PageMeta[] = [];
   let cur = pages.find((p) => p.id === id);
   const seen = new Set<string>();

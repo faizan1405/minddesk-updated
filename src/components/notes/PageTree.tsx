@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronRight, FileDown, FileText, MoreHorizontal, Pin, Plus } from "lucide-react";
+import { ChevronRight, FileDown, FileText, MoreHorizontal, Pencil, Pin, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ancestors, descendantCount, pageTitle, usePageActions, type PageFull, type PageMeta } from "@/lib/pages";
@@ -9,6 +9,9 @@ import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { TextPromptDialog } from "@/components/app/TextPromptDialog";
 import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 
@@ -119,6 +122,8 @@ function TreeRow({
 
   return (
     <div role="treeitem" aria-expanded={hasKids ? isOpen : undefined} aria-selected={active}>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
       <div
         className={cn(
           "group flex h-9 items-center gap-0.5 rounded-lg pr-1 text-sm transition-colors hover:bg-accent/70 md:h-8",
@@ -143,13 +148,13 @@ function TreeRow({
           )}
         </PageLink>
         <button type="button" onClick={onAddChild} aria-label="Add subpage" title="Add subpage"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100">
+          className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground transition-opacity", active ? "opacity-60 hover:opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}>
           <Plus className="h-3.5 w-3.5" />
         </button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" aria-label="Page actions"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 md:data-[state=open]:opacity-100">
+              className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground transition-opacity", active ? "opacity-80 hover:opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100")}>
               <MoreHorizontal className="h-3.5 w-3.5" />
             </button>
           </DropdownMenuTrigger>
@@ -158,8 +163,14 @@ function TreeRow({
               <Pin className="mr-2 h-4 w-4 text-amber-500" />
               <span>{page.is_pinned ? "Unpin note" : "Pin note"}</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setRenaming(true)}>Rename</DropdownMenuItem>
-            <DropdownMenuItem onSelect={onAddChild}>Add subpage</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setRenaming(true)}>
+              <Pencil className="mr-2 h-4 w-4 text-muted-foreground" />
+              <span>Rename</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onAddChild}>
+              <Plus className="mr-2 h-4 w-4 text-muted-foreground" />
+              <span>Add subpage</span>
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={exporting} onSelect={handleExportPdf}>
               <FileDown className="mr-2 h-4 w-4 text-primary" />
@@ -167,19 +178,47 @@ function TreeRow({
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
-              Delete
+              <Trash2 className="mr-2 h-4 w-4" />
+              <span>Delete note</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="w-48">
+        <ContextMenuItem onSelect={() => togglePinPage.mutate({ id: page.id, pinned: !page.is_pinned })}>
+          <Pin className="mr-2 h-4 w-4 text-amber-500" />
+          <span>{page.is_pinned ? "Unpin note" : "Pin note"}</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={() => setRenaming(true)}>
+          <Pencil className="mr-2 h-4 w-4 text-muted-foreground" />
+          <span>Rename</span>
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={onAddChild}>
+          <Plus className="mr-2 h-4 w-4 text-muted-foreground" />
+          <span>Add subpage</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={exporting} onSelect={handleExportPdf}>
+          <FileDown className="mr-2 h-4 w-4 text-primary" />
+          <span>Export as PDF</span>
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem className="text-destructive focus:text-destructive" onSelect={() => setDeleting(true)}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          <span>Delete note</span>
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
       {children}
 
       <TextPromptDialog open={renaming} onOpenChange={setRenaming} title="Rename page" initial={page.title}
         placeholder="Untitled" onSubmit={(v) => renamePage.mutateAsync({ id: page.id, title: v })} />
       <ConfirmDialog open={deleting} onOpenChange={setDeleting} title={`Delete "${pageTitle(page)}"?`}
         description={descendants
-          ? `Its ${descendants} subpage${descendants === 1 ? "" : "s"} will be deleted too. This can't be undone.`
-          : "This can't be undone."}
+          ? `This note and its ${descendants} subpage${descendants === 1 ? "" : "s"} will be moved to the Recycle Bin. You can restore them within 30 days.`
+          : "This note will be moved to the Recycle Bin. You can restore it within 30 days."}
+        confirmLabel="Move to Recycle Bin"
         onConfirm={() => deletePage.mutate(page.id, { onSuccess: () => onDeleted(page.id) })} />
     </div>
   );

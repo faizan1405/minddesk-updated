@@ -7,13 +7,19 @@ export const Route = createFileRoute("/api/trash")({
       GET: async ({ request }) => {
         const api = await import("@/lib/server/api.server");
         const { listTrash } = await import("@/lib/server/trash.server");
+        const { isDataPreservationMode, isStrictPreservationMode } =
+          await import("@/lib/server/preservation.server");
         return api.handle(async () => {
           const user = await api.requireUser(request);
           const url = new URL(request.url);
           const filter = (url.searchParams.get("filter") || "all") as TrashFilter;
           const search = url.searchParams.get("q") || undefined;
           const result = await listTrash(user.id, filter, search);
-          return api.json(result);
+          return api.json({
+            ...result,
+            preservation_mode: isDataPreservationMode(),
+            strict_mode: isStrictPreservationMode(),
+          });
         });
       },
     },

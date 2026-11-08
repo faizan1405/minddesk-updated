@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { type DecryptedDocumentItem, useVault } from "./VaultContext";
+import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import { format, differenceInDays } from "date-fns";
 
 interface DocumentCardProps {
@@ -39,6 +41,8 @@ interface DocumentCardProps {
 
 export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
   const { deleteDocument } = useVault();
+  const { preservationMode } = useAuth();
+  const isPreserved = preservationMode ?? true;
   const [revealNumber, setRevealNumber] = useState(false);
   const [copiedNotes, setCopiedNotes] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -139,9 +143,19 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                className={cn(
+                  "h-8 w-8",
+                  isPreserved
+                    ? "text-muted-foreground/40 cursor-not-allowed"
+                    : "text-muted-foreground hover:text-destructive",
+                )}
+                disabled={isPreserved}
                 onClick={() => setDeleteConfirmOpen(true)}
-                title="Delete document"
+                title={
+                  isPreserved
+                    ? "Document deletion is disabled while Data Preservation Mode is active"
+                    : "Delete document"
+                }
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -261,19 +275,25 @@ export function DocumentCard({ item, onView, onEdit }: DocumentCardProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete document?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete{" "}
-              <strong className="text-foreground">{item.data.title}</strong> and all its encrypted
-              attachments? This action is permanent and cannot be undone.
+              {isPreserved ? (
+                "Data Preservation Mode is active. Permanent deletion of Vault documents and attachments is disabled to protect your files."
+              ) : (
+                <>
+                  Are you sure you want to delete{" "}
+                  <strong className="text-foreground">{item.data.title}</strong> and all its encrypted
+                  attachments? This action is permanent and cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              disabled={isDeleting}
+              disabled={isDeleting || isPreserved}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isDeleting ? "Deleting..." : "Delete Document"}
+              {isPreserved ? "Deletion Disabled" : isDeleting ? "Deleting..." : "Delete Document"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

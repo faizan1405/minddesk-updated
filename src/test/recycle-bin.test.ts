@@ -24,7 +24,11 @@ describe("Recycle Bin System (30-Day Auto-Deletion & Safe Restoration)", () => {
   const mockUser = { id: "user_test_1", email: "tester@minddesk.com" };
 
   beforeEach(() => {
-    process.env = { ...originalEnv, DATABASE_URL: "mysql://mock" };
+    process.env = {
+      ...originalEnv,
+      DATABASE_URL: "mysql://mock",
+      DATA_PRESERVATION_MODE: "disabled",
+    };
     delete (globalThis as any).__prisma;
     vi.restoreAllMocks();
   });

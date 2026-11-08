@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { type DecryptedPasswordItem, useVault } from "./VaultContext";
+import { useAuth } from "@/hooks/use-auth";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow, format } from "date-fns";
 
 interface PasswordCardProps {
@@ -36,6 +38,8 @@ interface PasswordCardProps {
 
 export function PasswordCard({ item, onEdit }: PasswordCardProps) {
   const { deletePassword, isWindowBlurred } = useVault();
+  const { preservationMode } = useAuth();
+  const isPreserved = preservationMode ?? true;
   const [showPassword, setShowPassword] = useState(false);
   const [copiedField, setCopiedField] = useState<"username" | "password" | "notes" | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -119,9 +123,19 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                className={cn(
+                  "h-8 w-8",
+                  isPreserved
+                    ? "text-muted-foreground/40 cursor-not-allowed"
+                    : "text-muted-foreground hover:text-destructive",
+                )}
+                disabled={isPreserved}
                 onClick={() => setDeleteConfirmOpen(true)}
-                title="Delete entry"
+                title={
+                  isPreserved
+                    ? "Password deletion is disabled while Data Preservation Mode is active"
+                    : "Delete entry"
+                }
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -271,19 +285,25 @@ export function PasswordCard({ item, onEdit }: PasswordCardProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete saved password?</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete the credentials for{" "}
-              <strong className="text-foreground">{item.data.name}</strong>? This action is
-              permanent and cannot be undone.
+              {isPreserved ? (
+                "Data Preservation Mode is active. Permanent deletion of Vault password entries is disabled to protect your credentials."
+              ) : (
+                <>
+                  Are you sure you want to delete the credentials for{" "}
+                  <strong className="text-foreground">{item.data.name}</strong>? This action is
+                  permanent and cannot be undone.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
-              disabled={isDeleting}
+              disabled={isDeleting || isPreserved}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isDeleting ? "Deleting..." : "Delete Password"}
+              {isPreserved ? "Deletion Disabled" : isDeleting ? "Deleting..." : "Delete Password"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

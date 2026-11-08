@@ -1,4 +1,8 @@
 import { db, ApiError } from "@/lib/server/api.server";
+import {
+  isDataPreservationMode,
+  assertBulkDeletionAllowed,
+} from "@/lib/server/preservation.server";
 
 export type TrashItemType =
   "note" | "task" | "task_list" | "project" | "mind_map" | "event" | "habit" | "routine";
@@ -491,6 +495,7 @@ export async function permanentlyDeleteItem(
   type: TrashItemType,
   id: string,
 ): Promise<{ success: boolean; id: string }> {
+  assertBulkDeletionAllowed("single_permanent_delete");
   const prisma = db();
 
   return prisma.$transaction(async (tx) => {
@@ -643,6 +648,7 @@ export async function emptyTrash(
   userId: string,
   filter: TrashFilter = "all",
 ): Promise<{ deletedCount: number; lockedSkipped: number }> {
+  assertBulkDeletionAllowed("empty_trash");
   const { items } = await listTrash(userId, filter);
   let deletedCount = 0;
   let lockedSkipped = 0;
@@ -680,9 +686,31 @@ export async function cleanupExpiredTrash(options?: { simulatedCutoff?: Date }):
     habits: number;
     routines: number;
   };
+  preservation_mode?: boolean;
 }> {
-  const prisma = db();
   const cutoff = options?.simulatedCutoff ?? getExpirationCutoff(RETENTION_DAYS);
+
+  if (isDataPreservationMode()) {
+    console.log(
+      "[trash] Data Preservation Mode is active. Automated permanent purging is suppressed.",
+    );
+    return {
+      cutoff: cutoff.toISOString(),
+      deleted: {
+        tasks: 0,
+        task_lists: 0,
+        pages: 0,
+        projects: 0,
+        mind_maps: 0,
+        events: 0,
+        habits: 0,
+        routines: 0,
+      },
+      preservation_mode: true,
+    };
+  }
+
+  const prisma = db();
   const whereExpired = { deletedAt: { lte: cutoff } };
 
   // Run in transaction to maintain referential consistency and prevent cascade deletions of active children

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, FileDown, Loader2, Network, Pin } from "lucide-react";
+import { AlertCircle, Check, FileDown, Loader2, Network, Pin, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiRequestError } from "@/lib/api-client";
 import {
+  descendantCount,
+  pageTitle,
   setPageTitleInCache,
   usePage,
   usePageActions,
+  usePages,
   type PageFull,
   type PageMeta,
 } from "@/lib/pages";
@@ -18,6 +21,7 @@ import { exportNoteToPdf } from "@/lib/pdf-export-notes";
 import { NotesHistoryManager } from "@/lib/notes-history";
 import { BlockEditor, type FocusTarget } from "./BlockEditor";
 import { ErrorState, LoadingState } from "@/components/app/PageStates";
+import { ConfirmDialog } from "@/components/app/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -87,7 +91,11 @@ function LoadedEditor({
   isReloading?: boolean;
 }) {
   const qc = useQueryClient();
-  const { togglePinPage } = usePageActions();
+  const { togglePinPage, deletePage } = usePageActions();
+  const pagesQ = usePages();
+  const pages = pagesQ.data ?? [];
+  const descCount = descendantCount(pages, page.id);
+  const [deleting, setDeleting] = useState(false);
 
   const [isPinned, setIsPinned] = useState(Boolean(page.is_pinned));
   useEffect(() => {
@@ -382,6 +390,30 @@ function LoadedEditor({
     }
   }, [isExporting]);
 
+  const handleDelete = useCallback(() => {
+    deletePage.mutate(page.id, {
+      onSuccess: () => {
+        if (page.parent_id) {
+          if (page.project_id) {
+            navigate({
+              to: "/projects/$projectId/$pageId",
+              params: { projectId: page.project_id, pageId: page.parent_id },
+            });
+          } else {
+            navigate({ to: "/notes/$pageId", params: { pageId: page.parent_id } });
+          }
+        } else if (page.project_id) {
+          navigate({
+            to: "/projects/$projectId",
+            params: { projectId: page.project_id },
+          });
+        } else {
+          navigate({ to: "/notes" });
+        }
+      },
+    });
+  }, [deletePage, navigate, page.id, page.parent_id, page.project_id]);
+
   return (
     <div
       ref={editorContainerRef}
@@ -458,6 +490,19 @@ function LoadedEditor({
             )}
             <span>Export as PDF</span>
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setDeleting(true)}
+            disabled={Boolean(deletePage?.isPending)}
+            className="h-8 gap-1.5 rounded-lg border-border/70 bg-background/50 px-2.5 text-xs font-medium text-destructive hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive active:scale-95"
+            title="Delete note"
+            aria-label="Delete note"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            <span>Delete</span>
+          </Button>
         </div>
         <SaveStatus
           status={status}
@@ -526,6 +571,19 @@ function LoadedEditor({
         onUndo={handleUndo}
         onRedo={handleRedo}
         pendingFocusExternal={pendingFocusExternal}
+      />
+      <ConfirmDialog
+        open={deleting}
+        onOpenChange={setDeleting}
+        title={`Delete "${pageTitle(page)}"?`}
+        description={
+          descCount > 0
+            ? `This note and its ${descCount} subpage${descCount === 1 ? "" : "s"} will be moved to the Recycle Bin. You can restore them within 30 days.`
+            : "This note will be moved to the Recycle Bin. You can restore it within 30 days."
+        }
+        confirmLabel="Move to Recycle Bin"
+        onConfirm={handleDelete}
+        confirmDisabled={Boolean(deletePage?.isPending)}
       />
     </div>
   );

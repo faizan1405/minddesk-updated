@@ -19,7 +19,9 @@ export const Route = createFileRoute("/api/plan/categories/$id")({
       // Custom categories only; their activities become uncategorised (FK ON DELETE SET NULL).
       DELETE: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
+          assertBulkDeletionAllowed("plan_category_deletion");
           const user = await api.requireUser(request);
           const owned = await api.db().planCategory.findFirst({ where: { id: params.id, userId: user.id } });
           if (!owned) throw new api.ApiError(404, "Category not found");

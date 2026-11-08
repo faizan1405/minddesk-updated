@@ -5,14 +5,7 @@ import { listsKey, tasksKey } from "@/lib/tasks";
 import { pagesKey, projectsKey } from "@/lib/pages";
 
 export type TrashItemType =
-  | "note"
-  | "task"
-  | "task_list"
-  | "project"
-  | "mind_map"
-  | "event"
-  | "habit"
-  | "routine";
+  "note" | "task" | "task_list" | "project" | "mind_map" | "event" | "habit" | "routine";
 
 export type TrashFilter = "all" | "note" | "task" | "project" | "mind_map" | "calendar" | "habit";
 
@@ -31,6 +24,8 @@ export interface TrashItem {
 export interface TrashResponse {
   items: TrashItem[];
   counts: Record<TrashFilter, number>;
+  preservation_mode?: boolean;
+  strict_mode?: boolean;
 }
 
 export const trashKey = ["trash"] as const;

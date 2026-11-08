@@ -58,6 +58,19 @@ export const Route = createFileRoute("/api/vault/documents/$id")({
           const user = await api.requireUser(request);
           const body = UpdateInput.parse(await api.readJson(request));
 
+          // Reject explicit obsolete-attachment removal requests before updating encrypted metadata
+          if (body.obsolete_attachment_ids && body.obsolete_attachment_ids.length > 0) {
+            const { isDataPreservationMode } = await import("@/lib/server/preservation.server");
+            if (isDataPreservationMode()) {
+              throw new api.ApiError(
+                423,
+                "Data Preservation Mode is active: Removing existing attachments from documents is disabled. Your files remain protected.",
+                undefined,
+                { code: "DATA_PRESERVATION_ACTIVE", operation: "vault_attachment_deletion" },
+              );
+            }
+          }
+
           // 1. Atomic compare-and-swap update of encrypted document metadata
           // Guarantees obsolete attachments are NEVER deleted if the metadata commit fails
           const result = await api.db().vaultDocument.updateMany({
@@ -89,21 +102,28 @@ export const Route = createFileRoute("/api/vault/documents/$id")({
           // 2. Safe Post-Commit Obsolete Attachment Retirement
           // Executed strictly AFTER the new document version is committed to database
           if (body.obsolete_attachment_ids && body.obsolete_attachment_ids.length > 0) {
-            const retainedSet = new Set(body.retained_attachment_ids || []);
-            for (const obsoleteId of body.obsolete_attachment_ids) {
-              if (retainedSet.has(obsoleteId)) continue;
-              try {
-                const att = await api.db().vaultDocumentAttachment.findFirst({
-                  where: { id: obsoleteId, documentId: params.id, userId: user.id },
-                });
-                if (att) {
-                  await vaultStorage.deleteEncryptedAttachmentFile(user.id, obsoleteId);
+            const { isDataPreservationMode } = await import("@/lib/server/preservation.server");
+            if (isDataPreservationMode()) {
+              console.log(
+                `[vault] Data Preservation Mode active: Preserving ${body.obsolete_attachment_ids.length} obsolete attachment(s) without unlinking files.`,
+              );
+            } else {
+              const retainedSet = new Set(body.retained_attachment_ids || []);
+              for (const obsoleteId of body.obsolete_attachment_ids) {
+                if (retainedSet.has(obsoleteId)) continue;
+                try {
+                  const att = await api.db().vaultDocumentAttachment.findFirst({
+                    where: { id: obsoleteId, documentId: params.id, userId: user.id },
+                  });
+                  if (att) {
+                    await vaultStorage.deleteEncryptedAttachmentFile(user.id, obsoleteId);
+                  }
+                } catch (cleanupErr) {
+                  console.warn(
+                    `[vault] Non-fatal cleanup warning for obsolete attachment ${obsoleteId}:`,
+                    cleanupErr,
+                  );
                 }
-              } catch (cleanupErr) {
-                console.warn(
-                  `[vault] Non-fatal cleanup warning for obsolete attachment ${obsoleteId}:`,
-                  cleanupErr,
-                );
               }
             }
           }
@@ -142,7 +162,9 @@ export const Route = createFileRoute("/api/vault/documents/$id")({
       DELETE: async ({ request, params }) => {
         const api = await import("@/lib/server/api.server");
         const vaultStorage = await import("@/lib/server/vault-storage.server");
+        const { assertBulkDeletionAllowed } = await import("@/lib/server/preservation.server");
         return api.handle(async () => {
+          assertBulkDeletionAllowed("vault_document_deletion");
           const user = await api.requireUser(request);
 
           const existing = await api.db().vaultDocument.findFirst({

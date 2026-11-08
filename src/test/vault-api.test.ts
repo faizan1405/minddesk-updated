@@ -19,7 +19,7 @@ describe("My Private Vault API Endpoints", () => {
   const validDocumentUuid = "f1e2d3c4-b5a6-4987-a123-456789abcdef";
 
   beforeEach(() => {
-    process.env = { ...originalEnv, DATABASE_URL: "mysql://mock" };
+    process.env = { ...originalEnv, DATABASE_URL: "mysql://mock", DATA_PRESERVATION_MODE: "disabled" };
     delete (globalThis as any).__prisma;
     vi.restoreAllMocks();
   });

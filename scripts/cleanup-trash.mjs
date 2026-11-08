@@ -7,6 +7,17 @@ const prisma = new PrismaClient();
 const RETENTION_DAYS = 30;
 
 async function main() {
+  const envVal = process.env.DATA_PRESERVATION_MODE?.trim().toLowerCase();
+  const isPreservationMode = envVal !== "false" && envVal !== "disabled" && envVal !== "off";
+  const hasForceOverride = process.argv.includes("--force-unprotected-override");
+
+  if (isPreservationMode || !hasForceOverride) {
+    console.log(
+      "[cleanup-trash] DATA PRESERVATION MODE IS ACTIVE (default). Automatic permanent purging is disabled. Zero records were deleted. To override in maintenance mode, set DATA_PRESERVATION_MODE=disabled and supply --force-unprotected-override.",
+    );
+    process.exit(0);
+  }
+
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
   console.log(
     `[cleanup-trash] Running auto-deletion cleanup. Cutoff: ${cutoff.toISOString()} (items older than 30 days)`,
